@@ -119,26 +119,35 @@ Only recommend clinics from the list below.
 ${clinicText}`;
 }
 
+// Strip Python-style list brackets: ['A', 'B'] → A, B
+function parseList(val) {
+  if (!val) return "";
+  const s = String(val).trim();
+  if (!s.startsWith("[")) return s;
+  return s.slice(1, -1).split(",").map(p => p.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean).join(", ");
+}
+
 // Convert KV clinic objects into the text format Monica reads
 function clinicsToText(clinics) {
   return clinics.map(c => {
     const clean = v => (v && String(v).trim() && !["None","[]","{}","nan"].includes(String(v).trim())) ? String(v).trim() : "";
+    const cleanList = v => parseList(clean(v));
     const parts = [`NAME: ${clean(c.title) || "Unnamed"}`];
     if (clean(c.website))            parts.push(`WEBSITE: ${c.website}`);
     if (clean(c.address))            parts.push(`ADDRESS: ${c.address}`);
-    const region = clean(c.locations) || clean(c.postcode);
+    const region = cleanList(c.locations) || clean(c.postcode);
     if (region)                      parts.push(`REGION: ${region}`);
-    if (clean(c.cost))               parts.push(`COST: ${c.cost}`);
-    if (clean(c.payment))            parts.push(`PAYMENT: ${c.payment}`);
-    if (clean(c.insurance_networks)) parts.push(`INSURANCE: ${c.insurance_networks}`);
+    if (cleanList(c.cost))           parts.push(`COST: ${cleanList(c.cost)}`);
+    if (cleanList(c.payment))        parts.push(`PAYMENT: ${cleanList(c.payment)}`);
+    if (clean(c.insurance_networks)) parts.push(`INSURANCE: ${cleanList(c.insurance_networks)}`);
     if (clean(c.detox_on_site) && c.detox_on_site !== "False") parts.push(`DETOX: ${c.detox_on_site}`);
     if (clean(c.gender_model) && c.gender_model !== "unconfirmed") parts.push(`GENDER: ${c.gender_model}`);
     if (c.is_faith_based === "True" || c.is_faith_based === true) parts.push(`FAITH: ${clean(c.faith_tradition) || "Yes"}`);
     if (clean(c.min_age))            parts.push(`MIN_AGE: ${c.min_age}`);
     if (clean(c.regulatory_body) && clean(c.regulatory_rating)) parts.push(`RATING: ${c.regulatory_body} - ${c.regulatory_rating}`);
     else if (clean(c.regulatory_rating)) parts.push(`RATING: ${c.regulatory_rating}`);
-    if (clean(c.named_modalities))   parts.push(`THERAPIES: ${c.named_modalities}`);
-    if (clean(c.addictions_treated)) parts.push(`TREATS: ${c.addictions_treated}`);
+    if (clean(c.named_modalities))   parts.push(`THERAPIES: ${cleanList(c.named_modalities)}`);
+    if (clean(c.addictions_treated)) parts.push(`TREATS: ${cleanList(c.addictions_treated)}`);
     if (clean(c.rehab_type))         parts.push(`TYPE: ${c.rehab_type}`);
     if (clean(c.setting))            parts.push(`SETTING: ${c.setting}`);
     if (clean(c.capacity))           parts.push(`CAPACITY: ${c.capacity} beds`);
@@ -605,7 +614,10 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
   <div class="toolbar">
     <input type="text" id="clinic-search" placeholder="Search by name or location..." oninput="filterClinics()" />
     <button class="btn" onclick="openModal(null)">+ Add clinic</button>
+    <button class="btn secondary" onclick="exportCSV()">Export CSV</button>
+    <label class="btn secondary" style="cursor:pointer;margin:0">Import CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(event)"></label>
   </div>
+  <div id="import-status" style="display:none;padding:10px 0;font-size:13px;color:#16a34a"></div>
   <table class="clinic-table">
     <thead><tr><th>Name</th><th>Location</th><th>Funding</th><th>Rating</th><th style="width:110px">Actions</th></tr></thead>
     <tbody id="clinic-tbody"></tbody>
@@ -777,6 +789,82 @@ async function del(id) {
 }
 
 renderClinics(allClinics);
+
+// ---- CSV export ----
+const CSV_FIELDS = ['id','title','website','phone','address','postcode','locations','cost','payment',
+  'gender_model','capacity','min_age','regulatory_body','regulatory_rating','setting','rehab_type',
+  'detox_on_site','is_faith_based','faith_tradition','has_family_programme','named_modalities',
+  'addictions_treated','pricing_clean','ai_summary','description'];
+
+function csvEscape(v) {
+  const s = String(v == null ? '' : v).replace(/\[|\]/g,'').replace(/^['"]|['"]$/g,'');
+  return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+
+function exportCSV() {
+  const rows = [CSV_FIELDS.join(',')];
+  allClinics.forEach(c => {
+    rows.push(CSV_FIELDS.map(f => csvEscape(c[f] ?? '')).join(','));
+  });
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'clinics.csv';
+  a.click();
+}
+
+// ---- CSV import ----
+async function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const lines = text.split('\n').filter(l => l.trim());
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
+
+  function parseRow(line) {
+    const values = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"' && !inQ) { inQ = true; }
+      else if (ch === '"' && inQ && line[i+1] === '"') { cur += '"'; i++; }
+      else if (ch === '"' && inQ) { inQ = false; }
+      else if (ch === ',' && !inQ) { values.push(cur); cur = ''; }
+      else { cur += ch; }
+    }
+    values.push(cur);
+    return values;
+  }
+
+  const clinics = lines.slice(1).map(line => {
+    const vals = parseRow(line);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
+    if (obj.id) obj.id = parseInt(obj.id);
+    return obj;
+  }).filter(c => c.title);
+
+  const status = document.getElementById('import-status');
+  status.style.display = 'block';
+  status.textContent = \`Importing \${clinics.length} clinics...\`;
+  status.style.color = '#d97706';
+
+  let ok = 0, fail = 0;
+  for (const clinic of clinics) {
+    try {
+      const r = await fetch('/admin/api/clinics?pw=' + PW, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(clinic)
+      });
+      const d = await r.json();
+      if (d.ok) ok++; else fail++;
+    } catch { fail++; }
+  }
+
+  await loadClinics();
+  status.textContent = \`Import complete: \${ok} saved\${fail ? ', ' + fail + ' failed' : ''}.\`;
+  status.style.color = fail ? '#ef4444' : '#16a34a';
+  event.target.value = '';
+}
 </script>
 </body></html>`;
 }
