@@ -1,0 +1,28 @@
+# Wrangler local dev state
+.wrangler/
+
+# Environment / secrets
+.env
+.env.local
+.env.*
+
+# Claude Code
+.claude/
+
+# Internal audit and tooling (not part of the product)
+audit_batch_*.json
+clinic_content_audit.csv
+clinic_audit_report.json
+clinics_for_audit.json
+apply_audit_fixes.py
+revert_audit_fixes.py
+audit_clinics.py
+generate_summaries.py
+generate_demo_html.py
+build_demo.py
+
+# Generated
+demo.html
+
+# Node
+node_modules/
