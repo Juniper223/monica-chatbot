@@ -1,6 +1,8 @@
 import { DEMO_HTML } from "./demo_html.js";
+import { buildFormPage, buildFormSuccessPage } from "./form_html.js";
 
-const ADMIN_PASSWORD = "RehabOnline@123";
+// ADMIN_PASSWORD is now a Worker secret (env.ADMIN_PASSWORD)
+// Fallback only for local dev — never ship a hardcoded password in production
 const RATE_LIMIT_MAX = 30;
 
 // ---- system prompt (clinic data injected at runtime from KV) ----
@@ -21,6 +23,10 @@ Only ask a single upfront question if the request is completely bare - something
 QUESTIONS TO NEVER ASK
 
 Do not ask about substance type. Every clinic in this directory treats all forms of addiction - alcohol, drugs, or both. Asking "is this alcohol or drugs?" is pointless because the answer never changes the options.
+
+UNDER-18S
+
+If someone asks about treatment for a person under 18, only recommend clinics where UNDER_18S is "yes" or MIN_AGE is 16 or 17. Do not recommend adult-only clinics for under-18 patients. The clinics that accept under-18s in this directory are: Castle Craig (16+, Scotland), Western Counselling (16+), East Wharf Cottage/Nelson Trust (17+, women), Bosence Farm (young people's unit). If none of those fit, say so honestly and suggest they contact their GP or local CAMHS team.
 
 Do not ask about timeline. Do not say "are you looking to go in the coming weeks?" or anything about timing. The person decides when they are ready, and all private clinics here can admit quickly when a bed is available. Asking about timeline wastes their time and implies you would show different results, which you would not.
 
@@ -143,7 +149,8 @@ function clinicsToText(clinics) {
     if (clean(c.detox_on_site) && c.detox_on_site !== "False") parts.push(`DETOX: ${c.detox_on_site}`);
     if (clean(c.gender_model) && c.gender_model !== "unconfirmed") parts.push(`GENDER: ${c.gender_model}`);
     if (c.is_faith_based === "True" || c.is_faith_based === true) parts.push(`FAITH: ${clean(c.faith_tradition) || "Yes"}`);
-    if (clean(c.min_age))            parts.push(`MIN_AGE: ${c.min_age}`);
+    if (clean(c.treats_under_18s) && c.treats_under_18s !== "no") parts.push(`UNDER_18S: ${c.treats_under_18s}`);
+    if (clean(c.min_age) && String(c.min_age) !== "18") parts.push(`MIN_AGE: ${c.min_age}`);
     if (clean(c.regulatory_body) && clean(c.regulatory_rating)) parts.push(`RATING: ${c.regulatory_body} - ${c.regulatory_rating}`);
     else if (clean(c.regulatory_rating)) parts.push(`RATING: ${c.regulatory_rating}`);
     if (clean(c.named_modalities))   parts.push(`THERAPIES: ${cleanList(c.named_modalities)}`);
@@ -191,12 +198,110 @@ export default {
     if (url.pathname === "/chat" && request.method === "POST") {
       return handleChat(request, env, ctx);
     }
+    if (url.pathname === "/form") {
+      return handleForm(request, env, url);
+    }
     if (url.pathname.startsWith("/admin")) {
       return handleAdmin(request, env, url);
     }
     return new Response("Not found", { status: 404 });
   },
 };
+
+// ---- token helpers (HMAC-SHA256 via WebCrypto) ----
+
+async function signToken(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function verifyToken(secret, message, token) {
+  const expected = await signToken(secret, message);
+  if (expected.length !== token.length) return false;
+  // Constant-time comparison
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ token.charCodeAt(i);
+  return diff === 0;
+}
+
+function adminPassword(env) {
+  return env.ADMIN_PASSWORD || "RehabOnline@123"; // fallback for local dev only
+}
+
+// ---- form handler ----
+
+async function handleForm(request, env, url) {
+  const htmlHeaders = { "Content-Type": "text/html; charset=utf-8" };
+
+  if (request.method === "GET") {
+    const token  = url.searchParams.get("token") || "";
+    const expiry = url.searchParams.get("exp")   || "";
+    const id     = url.searchParams.get("id")    || "";
+
+    // Verify token
+    const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
+    const valid = token && expiry && await verifyToken(adminPassword(env), message, token);
+    if (!valid || Date.now() > parseInt(expiry)) {
+      return new Response("<h2>This link has expired or is invalid. Please contact Rehab Online for a new link.</h2>",
+        { status: 403, headers: htmlHeaders });
+    }
+
+    let clinic = null;
+    if (id) {
+      const clinics = await getClinics(env);
+      clinic = clinics.find(c => String(c.id) === id) || null;
+    }
+    return new Response(buildFormPage({ clinic, token, expiry }), { status: 200, headers: htmlHeaders });
+  }
+
+  if (request.method === "POST") {
+    const body = await request.formData();
+    const token  = body.get("token")  || "";
+    const expiry = body.get("expiry") || "";
+    const id     = body.get("clinic_id") || "";
+    const type   = body.get("type") || "new";
+
+    const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
+    const valid = token && expiry && await verifyToken(adminPassword(env), message, token);
+    if (!valid || Date.now() > parseInt(expiry)) {
+      return new Response(buildFormPage({ token, expiry, error: "This link has expired. Please request a new one." }),
+        { status: 403, headers: htmlHeaders });
+    }
+
+    // Collect submitted fields (exclude trust fields)
+    const TRUST_FIELDS = new Set(["min_age","treats_under_18s","regulatory_body","regulatory_rating",
+      "last_inspection_date","ai_summary"]);
+    const submission = { type, submitted_at: new Date().toISOString() };
+    if (id) submission.clinic_id = parseInt(id);
+
+    for (const [key, value] of body.entries()) {
+      if (TRUST_FIELDS.has(key) || ["token","expiry","clinic_id","type"].includes(key)) continue;
+      // Collect multi-value checkboxes as arrays
+      if (submission[key] !== undefined) {
+        if (!Array.isArray(submission[key])) submission[key] = [submission[key]];
+        submission[key].push(value);
+      } else {
+        submission[key] = value;
+      }
+    }
+
+    // Store in PENDING KV
+    if (env.PENDING) {
+      const pendingId = crypto.randomUUID();
+      await env.PENDING.put(`pending:${pendingId}`, JSON.stringify(submission));
+    }
+
+    const isUpdate = type === "update";
+    return new Response(buildFormSuccessPage(isUpdate), { status: 200, headers: htmlHeaders });
+  }
+
+  return new Response("Method not allowed", { status: 405 });
+}
 
 // ---- rate limiting ----
 
@@ -389,7 +494,7 @@ async function handleChat(request, env, ctx) {
 
 async function handleAdmin(request, env, url) {
   const pw = url.searchParams.get("pw") || request.headers.get("x-admin-pw");
-  if (pw !== ADMIN_PASSWORD) {
+  if (pw !== adminPassword(env)) {
     return new Response(adminLoginPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
@@ -421,6 +526,64 @@ async function handleAdmin(request, env, url) {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
     }
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Pending queue API
+  if (url.pathname === "/admin/api/pending") {
+    const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+    if (request.method === "GET") {
+      const list = env.PENDING ? (await env.PENDING.list({ prefix: "pending:" })).keys : [];
+      const items = await Promise.all(list.map(async k => {
+        const val = await env.PENDING.get(k.name);
+        return val ? { id: k.name.replace("pending:", ""), ...JSON.parse(val) } : null;
+      }));
+      return new Response(JSON.stringify(items.filter(Boolean)), { status: 200, headers });
+    }
+    // Approve: merge submission into clinic record
+    if (request.method === "POST") {
+      const { action, id, clinic_data } = await request.json();
+      if (action === "approve" && id) {
+        const clinics = await getClinics(env);
+        const cid = clinic_data.clinic_id;
+        if (cid) {
+          const idx = clinics.findIndex(c => c.id === cid);
+          if (idx >= 0) {
+            // Merge: submitted fields overwrite, trust fields preserved from existing
+            const trust = { min_age: clinics[idx].min_age, treats_under_18s: clinics[idx].treats_under_18s,
+              regulatory_body: clinics[idx].regulatory_body, regulatory_rating: clinics[idx].regulatory_rating,
+              last_inspection_date: clinics[idx].last_inspection_date, ai_summary: clinics[idx].ai_summary };
+            clinics[idx] = { ...clinics[idx], ...clinic_data, ...trust, id: cid };
+          }
+        } else {
+          // New clinic
+          const newClinic = { ...clinic_data, id: (clinics.reduce((mx, c) => Math.max(mx, c.id||0),0))+1 };
+          clinics.push(newClinic);
+        }
+        await saveClinics(env, clinics);
+        if (env.PENDING) await env.PENDING.delete(`pending:${id}`);
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+      }
+      if (action === "reject" && id) {
+        if (env.PENDING) await env.PENDING.delete(`pending:${id}`);
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+      }
+    }
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Generate form link
+  if (url.pathname === "/admin/api/generate-link") {
+    const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+    const id   = url.searchParams.get("id");   // null = new clinic link
+    const days = parseInt(url.searchParams.get("days") || "30");
+    const expiry = Date.now() + days * 86400000;
+    const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
+    const token = await signToken(adminPassword(env), message);
+    const base = url.origin;
+    const link = id
+      ? `${base}/form?id=${id}&token=${token}&exp=${expiry}`
+      : `${base}/form?token=${token}&exp=${expiry}`;
+    return new Response(JSON.stringify({ link, expiry: new Date(expiry).toISOString() }), { status: 200, headers });
   }
 
   // Server-side render the full admin page with all data baked in
@@ -585,6 +748,7 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
   <nav>
     <button class="active" onclick="showTab('analytics',this)">Analytics</button>
     <button onclick="showTab('clinics',this)">Clinics</button>
+    <button onclick="showTab('pending',this)" id="pending-tab-btn">Pending</button>
   </nav>
 </header>
 <main>
@@ -619,9 +783,37 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
   </div>
   <div id="import-status" style="display:none;padding:10px 0;font-size:13px;color:#16a34a"></div>
   <table class="clinic-table">
-    <thead><tr><th>Name</th><th>Location</th><th>Funding</th><th>Rating</th><th style="width:110px">Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Location</th><th>Funding</th><th>Rating</th><th style="width:160px">Actions</th></tr></thead>
     <tbody id="clinic-tbody"></tbody>
   </table>
+</div>
+
+<div id="tab-pending" class="tab">
+  <div class="toolbar" style="margin-bottom:16px">
+    <span style="font-size:14px;color:#64748b">Submissions waiting for review</span>
+    <button class="btn secondary" onclick="loadPending()" style="margin-left:auto">Refresh</button>
+    <button class="btn secondary" onclick="generateNewLink()">+ Generate new clinic link</button>
+  </div>
+  <div id="pending-list"><p style="color:#94a3b8;font-size:14px">Loading...</p></div>
+</div>
+
+</main>
+
+<div class="overlay" id="pending-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+<div class="modal" style="max-width:860px">
+  <button class="close-btn" onclick="document.getElementById('pending-overlay').classList.remove('open')">&times;</button>
+  <h3 id="pending-modal-title">Review submission</h3>
+  <div id="pending-modal-body"></div>
+  <div class="modal-footer" id="pending-modal-footer"></div>
+</div>
+</div>
+
+<div class="overlay" id="link-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+<div class="modal" style="max-width:540px">
+  <button class="close-btn" onclick="document.getElementById('link-overlay').classList.remove('open')">&times;</button>
+  <h3 id="link-modal-title">Clinic form link</h3>
+  <div id="link-modal-body"></div>
+</div>
 </div>
 
 </main>
@@ -645,9 +837,26 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
         <select id="f-gender_model"><option value="">Unconfirmed</option><option value="mixed">Mixed</option><option value="women-only">Women only</option><option value="men-only">Men only</option></select>
       </div>
       <div><label>Capacity (beds)</label><input id="f-capacity" type="number" /></div>
+      <div><label>Dual diagnosis</label>
+        <select id="f-dual_diagnosis"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select>
+      </div>
+      <div><label>Mother &amp; child service</label>
+        <select id="f-mother_child_service"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select>
+      </div>
+      <div><label>Price per week from (£)</label><input id="f-price_per_week_from" type="number" /></div>
+      <div><label>Price per week to (£)</label><input id="f-price_per_week_to" type="number" /></div>
+      <div style="grid-column:1/-1"><hr style="border:none;border-top:1px dashed #e2e8f0;margin:8px 0"><p style="font-size:11px;color:#f59e0b;font-weight:600">TRUST FIELDS — set by Rehab Online only, not visible to clinics in their form</p></div>
       <div><label>Minimum age</label><input id="f-min_age" type="number" /></div>
-      <div><label>Regulatory body</label><input id="f-regulatory_body" placeholder="CQC, CIW..." /></div>
-      <div><label>Regulatory rating</label><input id="f-regulatory_rating" /></div>
+      <div><label>Treats under-18s</label>
+        <select id="f-treats_under_18s"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select>
+      </div>
+      <div><label>Regulatory body</label>
+        <select id="f-regulatory_body"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate Scotland</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (N. Ireland)</option></select>
+      </div>
+      <div><label>Regulatory rating</label>
+        <select id="f-regulatory_rating"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select>
+      </div>
+      <div><label>Last inspection date</label><input id="f-last_inspection_date" placeholder="e.g. Nov 2024" /></div>
       <div><label>Setting</label><input id="f-setting" placeholder="rural, urban, coastal..." /></div>
       <div><label>Rehab type</label><input id="f-rehab_type" /></div>
       <div><label>Detox on site</label>
@@ -709,7 +918,9 @@ function renderClinics(list) {
     '<td style="color:#64748b">' + esc(parseList(c.locations||c.postcode||'').split(',')[0].trim().slice(0,30)) + '</td>' +
     '<td>' + costBadge(c.cost) + '</td>' +
     '<td style="font-size:12px">' + (c.regulatory_rating ? esc(c.regulatory_rating) : '<span style="color:#94a3b8">-</span>') + '</td>' +
-    '<td><button class="btn sm" onclick="openModal(' + c.id + ')">Edit</button> ' +
+    '<td>' +
+    '<button class="btn sm" onclick="openModal(' + c.id + ')">Edit</button> ' +
+    '<button class="btn sm secondary" onclick="genLink(' + c.id + ')" title="Generate update link for clinic">Link</button> ' +
     '<button class="btn sm danger" onclick="del(' + c.id + ')">Del</button></td>' +
     '</tr>'
   ).join('');
@@ -725,9 +936,93 @@ function filterClinics() {
 }
 
 const FIELDS = ['id','title','website','phone','address','postcode','locations','cost','payment',
-  'gender_model','capacity','min_age','regulatory_body','regulatory_rating','setting','rehab_type',
-  'detox_on_site','is_faith_based','faith_tradition','has_family_programme','named_modalities',
-  'addictions_treated','pricing_clean','ai_summary','description'];
+  'gender_model','capacity','dual_diagnosis','mother_child_service','price_per_week_from','price_per_week_to',
+  'min_age','treats_under_18s','regulatory_body','regulatory_rating','last_inspection_date',
+  'setting','rehab_type','detox_on_site','is_faith_based','faith_tradition','has_family_programme',
+  'named_modalities','addictions_treated','pricing_clean','ai_summary','description'];
+
+// ---- Pending queue ----
+async function loadPending() {
+  const r = await fetch('/admin/api/pending?pw=' + PW);
+  const items = await r.json();
+  const btn = document.getElementById('pending-tab-btn');
+  if (btn) btn.textContent = items.length ? 'Pending (' + items.length + ')' : 'Pending';
+  const el = document.getElementById('pending-list');
+  if (!el) return;
+  if (!items.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:14px;padding:20px 0">No pending submissions.</p>'; return; }
+  el.innerHTML = items.map(function(item) {
+    var title = item.title || '(untitled)';
+    var type = item.type === 'update' ? 'Update' : 'New clinic';
+    var date = item.submitted_at ? item.submitted_at.slice(0,10) : '';
+    return '<div style="background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);display:flex;align-items:center;gap:16px">' +
+      '<div style="flex:1"><strong style="font-size:14px">' + esc(title) + '</strong>' +
+      '<span style="margin-left:10px;background:' + (type==='New clinic'?'#dcfce7':'#ede9fe') + ';color:' + (type==='New clinic'?'#16a34a':'#7c3aed') + ';padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">' + type + '</span>' +
+      (date ? '<span style="margin-left:8px;font-size:12px;color:#94a3b8">' + date + '</span>' : '') + '</div>' +
+      '<button class="btn sm" onclick="reviewPending(\'' + item.id + '\')">Review</button> ' +
+      '<button class="btn sm danger" onclick="rejectPending(\'' + item.id + '\')">Reject</button></div>';
+  }).join('');
+}
+
+var _pendingCache = [];
+async function reviewPending(id) {
+  var items = await fetch('/admin/api/pending?pw=' + PW).then(function(r){return r.json();});
+  var item = items.find(function(i){return i.id===id;});
+  if (!item) return;
+  _pendingCache = items;
+  document.getElementById('pending-modal-title').textContent = (item.type==='update'?'Update: ':'New clinic: ') + (item.title||'');
+  var rows = Object.entries(item).filter(function(e){return !['id','type','submitted_at','clinic_id'].includes(e[0]);})
+    .map(function(e){return '<tr><td style="font-size:12px;color:#64748b;padding:4px 8px;width:180px">'+esc(e[0])+'</td><td style="font-size:13px;padding:4px 8px">'+esc(Array.isArray(e[1])?e[1].join(', '):String(e[1]||''))+'</td></tr>';}).join('');
+  document.getElementById('pending-modal-body').innerHTML = '<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
+  document.getElementById('pending-modal-footer').innerHTML =
+    '<button class="btn secondary" onclick="document.getElementById(\'pending-overlay\').classList.remove(\'open\')">Cancel</button> ' +
+    '<button class="btn danger" onclick="rejectPending(\''+id+'\');document.getElementById(\'pending-overlay\').classList.remove(\'open\')">Reject</button> ' +
+    '<button class="btn" onclick="approvePending(\''+id+'\')">Approve &amp; publish</button>';
+  document.getElementById('pending-overlay').classList.add('open');
+}
+
+async function approvePending(id) {
+  var items = await fetch('/admin/api/pending?pw='+PW).then(function(r){return r.json();});
+  var item = items.find(function(i){return i.id===id;});
+  if (!item) return;
+  var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'approve',id:id,clinic_data:item})});
+  var d = await r.json();
+  if (d.ok) {
+    document.getElementById('pending-overlay').classList.remove('open');
+    allClinics = await fetch('/admin/api/clinics?pw='+PW).then(function(r){return r.json();});
+    renderClinics(allClinics);
+    loadPending();
+  }
+}
+
+async function rejectPending(id) {
+  if (!confirm('Reject and delete this submission?')) return;
+  await fetch('/admin/api/pending?pw='+PW,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reject',id:id})});
+  loadPending();
+}
+
+async function genLink(clinicId) {
+  var r = await fetch('/admin/api/generate-link?pw='+PW+'&id='+clinicId+'&days=30');
+  var d = await r.json();
+  showLink('Update link for clinic (30 days)', d.link, d.expiry);
+}
+
+async function generateNewLink() {
+  var r = await fetch('/admin/api/generate-link?pw='+PW+'&days=7');
+  var d = await r.json();
+  showLink('New clinic application link (7 days)', d.link, d.expiry);
+}
+
+function showLink(title, link, expiry) {
+  document.getElementById('link-modal-title').textContent = title;
+  var exDate = new Date(expiry).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('link-modal-body').innerHTML =
+    '<p style="font-size:13px;color:#64748b;margin-bottom:12px">Send this to the clinic. Expires ' + exDate + '.</p>' +
+    '<textarea style="width:100%;height:80px;font-size:12px;font-family:monospace;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;resize:none" readonly id="link-text">' + esc(link) + '</textarea>' +
+    '<button class="btn" style="margin-top:10px;width:100%" onclick="navigator.clipboard.writeText(document.getElementById(\'link-text\').value).then(function(){this.textContent=\'Copied!\';}.bind(this))">Copy link</button>';
+  document.getElementById('link-overlay').classList.add('open');
+}
+
+loadPending();
 
 // Fields stored as Python-style lists: ['A', 'B'] — convert to plain "A, B" for editing
 const LIST_FIELDS = new Set(['locations','cost','payment','insurance_networks',
@@ -792,13 +1087,14 @@ renderClinics(allClinics);
 
 // ---- CSV export ----
 const CSV_FIELDS = ['id','title','website','phone','address','postcode','locations','cost','payment',
-  'gender_model','capacity','min_age','regulatory_body','regulatory_rating','setting','rehab_type',
-  'detox_on_site','is_faith_based','faith_tradition','has_family_programme','named_modalities',
-  'addictions_treated','pricing_clean','ai_summary','description'];
+  'gender_model','capacity','dual_diagnosis','mother_child_service','price_per_week_from','price_per_week_to',
+  'min_age','treats_under_18s','regulatory_body','regulatory_rating','last_inspection_date',
+  'setting','rehab_type','detox_on_site','is_faith_based','faith_tradition','has_family_programme',
+  'named_modalities','addictions_treated','pricing_clean','ai_summary','description'];
 
 function csvEscape(v) {
-  const s = String(v == null ? '' : v).replace(/\[|\]/g,'').replace(/^['"]|['"]$/g,'');
-  return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s;
+  const s = String(v == null ? '' : v).replace(/\\[|\\]/g,'').replace(/^['"]|['"]$/g,'');
+  return s.includes(',') || s.includes('"') ? '"' + s.replace(/"/g,'""') + '"' : s;
 }
 
 function exportCSV() {
@@ -806,7 +1102,7 @@ function exportCSV() {
   allClinics.forEach(c => {
     rows.push(CSV_FIELDS.map(f => csvEscape(c[f] ?? '')).join(','));
   });
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const blob = new Blob([rows.join('\\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'clinics.csv';
@@ -818,7 +1114,7 @@ async function importCSV(event) {
   const file = event.target.files[0];
   if (!file) return;
   const text = await file.text();
-  const lines = text.split('\n').filter(l => l.trim());
+  const lines = text.split('\\n').filter(l => l.trim());
   const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
 
   function parseRow(line) {
@@ -860,7 +1156,9 @@ async function importCSV(event) {
     } catch { fail++; }
   }
 
-  await loadClinics();
+  const updated = await fetch('/admin/api/clinics?pw=' + PW);
+  allClinics = await updated.json();
+  renderClinics(allClinics);
   status.textContent = \`Import complete: \${ok} saved\${fail ? ', ' + fail + ' failed' : ''}.\`;
   status.style.color = fail ? '#ef4444' : '#16a34a';
   event.target.value = '';
