@@ -150,6 +150,7 @@ function clinicsToText(clinics) {
     if (clean(c.detox_on_site) && c.detox_on_site !== "False") parts.push(`DETOX: ${c.detox_on_site}`);
     if (clean(c.gender_model) && c.gender_model !== "unconfirmed") parts.push(`GENDER: ${c.gender_model}`);
     if (c.is_faith_based === "True" || c.is_faith_based === true) parts.push(`FAITH: ${clean(c.faith_tradition) || "Yes"}`);
+    if (clean(c.twelve_step) && c.twelve_step !== "no") parts.push(`TWELVE_STEP: ${c.twelve_step}`);
     if (clean(c.treats_under_18s) && c.treats_under_18s !== "no") parts.push(`UNDER_18S: ${c.treats_under_18s}`);
     if (clean(c.min_age) && String(c.min_age) !== "18") parts.push(`MIN_AGE: ${c.min_age}`);
     if (clean(c.regulatory_body) && clean(c.regulatory_rating)) parts.push(`RATING: ${c.regulatory_body} - ${c.regulatory_rating}`);
@@ -275,7 +276,7 @@ async function handleForm(request, env, url) {
     }
 
     // Collect submitted fields (exclude trust fields)
-    const TRUST_FIELDS = new Set(["min_age","treats_under_18s","regulatory_body","regulatory_rating",
+    const TRUST_FIELDS = new Set(["min_age","treats_under_18s","regulatory_body","regulatory_rating", // treats_under_18s_claimed IS allowed (self-declared, goes to pending for verification)
       "last_inspection_date","ai_summary"]);
     const submission = { type, submitted_at: new Date().toISOString() };
     if (id) submission.clinic_id = parseInt(id);
@@ -731,8 +732,9 @@ a{color:#4f5fe8;font-size:13px;text-decoration:none}
 .badge.nhs{background:#dcfce7;color:#16a34a}.badge.private{background:#ede9fe;color:#7c3aed}.badge.both{background:#fef3c7;color:#d97706}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;overflow-y:auto;padding:20px}
 .overlay.open{display:flex;align-items:flex-start;justify-content:center}
-.modal{background:#fff;border-radius:14px;width:100%;max-width:700px;padding:28px;position:relative;margin:auto}
-.modal h3{font-size:18px;font-weight:700;color:#141a5b;margin-bottom:20px}
+.modal{background:#fff;border-radius:14px;width:100%;max-width:700px;padding:28px;position:relative;margin:auto;max-height:90vh;display:flex;flex-direction:column}
+.modal h3{font-size:18px;font-weight:700;color:#141a5b;margin-bottom:20px;flex-shrink:0}
+.modal-scroll{overflow-y:auto;flex:1;padding-right:4px}
 .close-btn{position:absolute;top:16px;right:18px;background:none;border:none;font-size:24px;cursor:pointer;color:#94a3b8;line-height:1}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form-grid .full{grid-column:1/-1}
@@ -740,7 +742,10 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
 .form-grid input,.form-grid textarea,.form-grid select{width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;outline:none}
 .form-grid input:focus,.form-grid textarea:focus,.form-grid select:focus{border-color:#4f5fe8}
 .form-grid textarea{resize:vertical;min-height:72px}
-.modal-footer{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f1f5f9;padding-top:16px}
+.trust-section{background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:12px;margin-top:4px;grid-column:1/-1}
+.trust-section p{font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px}
+.trust-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal-footer{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f1f5f9;padding-top:16px;flex-shrink:0}
 .empty{color:#94a3b8;font-size:14px;padding:40px;text-align:center}
 </style>
 </head><body>
@@ -823,7 +828,8 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
 <div class="modal">
   <button class="close-btn" onclick="closeModal()">&times;</button>
   <h3 id="modal-title">Add clinic</h3>
-  <form id="clinic-form" onsubmit="saveClinic(event)">
+  <form id="clinic-form" onsubmit="saveClinic(event)" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+  <div class="modal-scroll">
     <input type="hidden" id="f-id" />
     <div class="form-grid">
       <div class="full"><label>Clinic name *</label><input id="f-title" required /></div>
@@ -831,37 +837,21 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
       <div><label>Phone</label><input id="f-phone" /></div>
       <div class="full"><label>Address</label><input id="f-address" /></div>
       <div><label>Postcode</label><input id="f-postcode" /></div>
-      <div><label>Region / county</label><input id="f-locations" /></div>
+      <div><label>Locations / regions (comma separated)</label><input id="f-locations" placeholder="e.g. Cornwall, South West" /></div>
       <div><label>Cost (NHS / Private / Both)</label><input id="f-cost" /></div>
       <div><label>Payment methods</label><input id="f-payment" /></div>
       <div><label>Gender model</label>
         <select id="f-gender_model"><option value="">Unconfirmed</option><option value="mixed">Mixed</option><option value="women-only">Women only</option><option value="men-only">Men only</option></select>
       </div>
       <div><label>Capacity (beds)</label><input id="f-capacity" type="number" /></div>
+      <div><label>Detox on site</label>
+        <select id="f-detox_on_site"><option value="">Unknown</option><option value="True">Yes</option><option value="False">No</option></select>
+      </div>
       <div><label>Dual diagnosis</label>
         <select id="f-dual_diagnosis"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select>
       </div>
-      <div><label>Mother &amp; child service</label>
-        <select id="f-mother_child_service"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select>
-      </div>
-      <div><label>Price per week from (£)</label><input id="f-price_per_week_from" type="number" /></div>
-      <div><label>Price per week to (£)</label><input id="f-price_per_week_to" type="number" /></div>
-      <div style="grid-column:1/-1"><hr style="border:none;border-top:1px dashed #e2e8f0;margin:8px 0"><p style="font-size:11px;color:#f59e0b;font-weight:600">TRUST FIELDS — set by Rehab Online only, not visible to clinics in their form</p></div>
-      <div><label>Minimum age</label><input id="f-min_age" type="number" /></div>
-      <div><label>Treats under-18s</label>
-        <select id="f-treats_under_18s"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select>
-      </div>
-      <div><label>Regulatory body</label>
-        <select id="f-regulatory_body"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate Scotland</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (N. Ireland)</option></select>
-      </div>
-      <div><label>Regulatory rating</label>
-        <select id="f-regulatory_rating"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select>
-      </div>
-      <div><label>Last inspection date</label><input id="f-last_inspection_date" placeholder="e.g. Nov 2024" /></div>
-      <div><label>Setting</label><input id="f-setting" placeholder="rural, urban, coastal..." /></div>
-      <div><label>Rehab type</label><input id="f-rehab_type" /></div>
-      <div><label>Detox on site</label>
-        <select id="f-detox_on_site"><option value="">Unknown</option><option value="True">Yes</option><option value="False">No</option></select>
+      <div><label>12-step programme</label>
+        <select id="f-twelve_step"><option value="">Unknown</option><option value="yes">Yes</option><option value="informed">12-step informed</option><option value="no">No</option></select>
       </div>
       <div><label>Faith based</label>
         <select id="f-is_faith_based"><option value="">No</option><option value="True">Yes</option></select>
@@ -870,12 +860,42 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
       <div><label>Family programme</label>
         <select id="f-has_family_programme"><option value="">Unknown</option><option value="True">Yes</option><option value="False">No</option></select>
       </div>
+      <div><label>Mother &amp; child service</label>
+        <select id="f-mother_child_service"><option value="">Unknown</option><option value="true">Yes</option><option value="false">No</option></select>
+      </div>
+      <div><label>Setting</label><input id="f-setting" placeholder="rural, urban, coastal..." /></div>
+      <div><label>Price per week from (£)</label><input id="f-price_per_week_from" type="number" /></div>
+      <div><label>Price per week to (£)</label><input id="f-price_per_week_to" type="number" /></div>
+      <div><label>Rehab type</label><input id="f-rehab_type" /></div>
       <div class="full"><label>Named therapies / modalities</label><input id="f-named_modalities" /></div>
       <div class="full"><label>Addictions treated</label><input id="f-addictions_treated" /></div>
       <div class="full"><label>Pricing (plain text)</label><input id="f-pricing_clean" /></div>
       <div class="full"><label>AI summary (what Monica says about this clinic)</label><textarea id="f-ai_summary" style="min-height:90px"></textarea></div>
-      <div class="full"><label>Description</label><textarea id="f-description"></textarea></div>
+      <div class="full"><label>Description (max 600 chars)</label><textarea id="f-description" maxlength="600"></textarea></div>
+      <div class="trust-section full">
+        <p>TRUST FIELDS - set by Rehab Online only, not shown to clinics in the public form</p>
+        <div class="trust-grid">
+          <div><label>Minimum age</label><input id="f-min_age" type="number" style="width:100%;padding:8px 10px;border:1.5px solid #fbbf24;border-radius:7px;font-size:13px;font-family:inherit;outline:none" /></div>
+          <div><label>Treats under-18s</label>
+            <select id="f-treats_under_18s" style="width:100%;padding:8px 10px;border:1.5px solid #fbbf24;border-radius:7px;font-size:13px;font-family:inherit;outline:none">
+              <option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed - call to verify</option>
+            </select>
+          </div>
+          <div><label>Regulatory body</label>
+            <select id="f-regulatory_body" style="width:100%;padding:8px 10px;border:1.5px solid #fbbf24;border-radius:7px;font-size:13px;font-family:inherit;outline:none">
+              <option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate Scotland</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (N. Ireland)</option>
+            </select>
+          </div>
+          <div><label>Regulatory rating</label>
+            <select id="f-regulatory_rating" style="width:100%;padding:8px 10px;border:1.5px solid #fbbf24;border-radius:7px;font-size:13px;font-family:inherit;outline:none">
+              <option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option>
+            </select>
+          </div>
+          <div><label>Last inspection date</label><input id="f-last_inspection_date" placeholder="e.g. Nov 2024" style="width:100%;padding:8px 10px;border:1.5px solid #fbbf24;border-radius:7px;font-size:13px;font-family:inherit;outline:none" /></div>
+        </div>
+      </div>
     </div>
+  </div>
     <div class="modal-footer">
       <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
       <button type="submit" class="btn" id="save-btn">Save clinic</button>
@@ -941,8 +961,9 @@ a{color:#4f5fe8;font-size:13px;text-decoration:none}
 .badge.nhs{background:#dcfce7;color:#16a34a}.badge.private{background:#ede9fe;color:#7c3aed}.badge.both{background:#fef3c7;color:#d97706}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;overflow-y:auto;padding:20px}
 .overlay.open{display:flex;align-items:flex-start;justify-content:center}
-.modal{background:#fff;border-radius:14px;width:100%;max-width:700px;padding:28px;position:relative;margin:auto}
-.modal h3{font-size:18px;font-weight:700;color:#141a5b;margin-bottom:20px}
+.modal{background:#fff;border-radius:14px;width:100%;max-width:700px;padding:28px;position:relative;margin:auto;max-height:90vh;display:flex;flex-direction:column}
+.modal h3{font-size:18px;font-weight:700;color:#141a5b;margin-bottom:20px;flex-shrink:0}
+.modal-scroll{overflow-y:auto;flex:1;padding-right:4px}
 .close-btn{position:absolute;top:16px;right:18px;background:none;border:none;font-size:24px;cursor:pointer;color:#94a3b8;line-height:1}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form-grid .full{grid-column:1/-1}
@@ -950,7 +971,10 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
 .form-grid input,.form-grid textarea,.form-grid select{width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;outline:none}
 .form-grid input:focus,.form-grid textarea:focus,.form-grid select:focus{border-color:#4f5fe8}
 .form-grid textarea{resize:vertical;min-height:72px}
-.modal-footer{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f1f5f9;padding-top:16px}
+.trust-section{background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:12px;margin-top:4px;grid-column:1/-1}
+.trust-section p{font-size:11px;color:#92400e;font-weight:600;margin-bottom:10px}
+.trust-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal-footer{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f1f5f9;padding-top:16px;flex-shrink:0}
 .empty{color:#94a3b8;font-size:14px;padding:40px;text-align:center}
 </style>
 </head><body>

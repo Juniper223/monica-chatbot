@@ -56,10 +56,10 @@ function filterClinics() {
 }
 
 var FIELDS = ['id','title','website','phone','address','postcode','locations','cost','payment',
-  'gender_model','capacity','dual_diagnosis','mother_child_service','price_per_week_from','price_per_week_to',
-  'min_age','treats_under_18s','regulatory_body','regulatory_rating','last_inspection_date',
-  'setting','rehab_type','detox_on_site','is_faith_based','faith_tradition','has_family_programme',
-  'named_modalities','addictions_treated','pricing_clean','ai_summary','description'];
+  'gender_model','capacity','detox_on_site','dual_diagnosis','twelve_step','is_faith_based','faith_tradition',
+  'has_family_programme','mother_child_service','setting','price_per_week_from','price_per_week_to',
+  'rehab_type','named_modalities','addictions_treated','pricing_clean','ai_summary','description',
+  'min_age','treats_under_18s','regulatory_body','regulatory_rating','last_inspection_date'];
 
 var LIST_FIELDS = new Set(['locations','cost','payment','insurance_networks','named_modalities','addictions_treated','rehab_type','accessibility']);
 

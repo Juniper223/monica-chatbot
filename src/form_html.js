@@ -1,5 +1,5 @@
 // Clinic intake form — new submission or update of existing clinic
-// This is a standalone JS module so template-literal escaping is not an issue.
+// Standalone JS module so template-literal escaping is not an issue.
 
 export function buildFormPage({ clinic = null, token, expiry, error = null }) {
   const isUpdate = !!clinic;
@@ -20,8 +20,11 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
   function sel(field, value) {
     return val(field) === value ? 'selected' : '';
   }
+  function radio(name, value, label, extraChecked = false) {
+    const isChecked = val(name) === value || extraChecked;
+    return `<label class="radio-label"><input type="radio" name="${name}" value="${value}"${isChecked ? ' checked' : ''}> ${label}</label>`;
+  }
 
-  // WordPress-canonical multi-select options
   const TREATMENT_TYPES = [
     ['residential', 'Residential rehabilitation'],
     ['detox', 'Standalone detox'],
@@ -52,6 +55,8 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
     ).join('\n');
   }
 
+  const descriptionVal = val('description').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -73,7 +78,7 @@ input[type=text],input[type=email],input[type=tel],input[type=url],input[type=nu
   width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;
   font-family:inherit;outline:none;background:#fff}
 input:focus,select:focus,textarea:focus{border-color:#4f5fe8}
-textarea{resize:vertical;min-height:90px}
+textarea{resize:vertical;min-height:120px}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .check-group{display:flex;flex-direction:column;gap:8px;margin-top:4px}
 .check-label{display:flex;align-items:flex-start;gap:8px;font-size:14px;cursor:pointer;line-height:1.4}
@@ -90,6 +95,11 @@ textarea{resize:vertical;min-height:90px}
 .btn:hover{background:#1e2a8a}
 .error-box{background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 16px;
   color:#991b1b;font-size:13px;margin-bottom:20px}
+.char-count{font-size:12px;color:#94a3b8;text-align:right;margin-top:4px}
+.char-count.near{color:#f59e0b}
+.char-count.full{color:#ef4444}
+.photo-list{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}
+.photo-preview{width:120px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0}
 @media(max-width:600px){.two-col{grid-template-columns:1fr}}
 </style>
 </head>
@@ -101,14 +111,15 @@ textarea{resize:vertical;min-height:90px}
 <div class="container">
 ${error ? `<div class="error-box">${error}</div>` : ''}
 <div class="trust-notice">
-  Fields marked <strong>Admin only</strong> — regulatory rating, CQC/HIS status, age verification — are set by Rehab Online after verification and are not part of this form.
+  Some fields (regulatory status, inspection rating, age verification) are set by Rehab Online after verification and are not part of this form.
 </div>
 
-<form method="POST" action="/form">
+<form method="POST" action="/form" enctype="multipart/form-data">
 <input type="hidden" name="token" value="${token}">
 <input type="hidden" name="expiry" value="${expiry}">
 ${clinic ? `<input type="hidden" name="clinic_id" value="${clinic.id}">` : ''}
 <input type="hidden" name="type" value="${isUpdate ? 'update' : 'new'}">
+<input type="hidden" name="photo_data" id="photo-data-hidden" value="">
 
 <!-- 1. Basic information -->
 <div class="section">
@@ -125,12 +136,8 @@ ${clinic ? `<input type="hidden" name="clinic_id" value="${clinic.id}">` : ''}
   <input type="email" name="email" value="${val('email')}" placeholder="admissions@clinic.co.uk"></div>
 <div class="field"><label>Address *</label>
   <input type="text" name="address" value="${val('address')}" required placeholder="House, Street, Town"></div>
-<div class="two-col">
-  <div class="field"><label>Postcode *</label>
-    <input type="text" name="postcode" value="${val('postcode')}" required placeholder="SW1A 1AA"></div>
-  <div class="field"><label>Region / county</label>
-    <input type="text" name="region" value="${val('locations') || val('region')}" placeholder="e.g. Bedfordshire, South West"></div>
-</div>
+<div class="field"><label>Postcode *</label>
+  <input type="text" name="postcode" value="${val('postcode')}" required placeholder="SW1A 1AA"></div>
 </div>
 
 <!-- 2. Treatment types -->
@@ -179,33 +186,41 @@ ${checkboxGroup('funding_types', FUNDING_TYPES)}
 <h2>6. Access and eligibility</h2>
 <div class="field"><label>Gender</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="gender_model" value="mixed" ${sel('gender_model','mixed') || (!clinic ? 'checked' : '')}> Mixed</label>
-  <label class="radio-label"><input type="radio" name="gender_model" value="women_only" ${sel('gender_model','women_only')}> Women only</label>
-  <label class="radio-label"><input type="radio" name="gender_model" value="men_only" ${sel('gender_model','men_only')}> Men only</label>
+  ${radio('gender_model','mixed','Mixed',!clinic)}
+  ${radio('gender_model','women_only','Women only')}
+  ${radio('gender_model','men_only','Men only')}
 </div></div>
+
+<div class="field"><label>Do you treat people under 18?</label>
+<div class="radio-row">
+  ${radio('treats_under_18s_claimed','yes','Yes, we accept patients under 18')}
+  ${radio('treats_under_18s_claimed','no','No, adults only (18+)',!clinic)}
+  ${radio('treats_under_18s_claimed','contact','Please contact us to discuss')}
+</div>
+<div class="hint">This will be independently verified by Rehab Online before publishing.</div></div>
 
 <div class="field"><label>Detox on site?</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="detox_on_site" value="True" ${val('detox_on_site') === 'True' ? 'checked' : ''}> Yes, on site</label>
-  <label class="radio-label"><input type="radio" name="detox_on_site" value="False" ${val('detox_on_site') === 'False' ? 'checked' : ''}> No</label>
+  ${radio('detox_on_site','True',val('detox_on_site') === 'True' ? 'Yes, on site' : 'Yes, on site')}
+  ${radio('detox_on_site','False','No')}
 </div></div>
 
-<div class="field"><label>Dual diagnosis (addiction + mental health at same time)?</label>
+<div class="field"><label>Dual diagnosis (addiction and mental health treated together)?</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="dual_diagnosis" value="true" ${val('dual_diagnosis') === 'true' ? 'checked' : ''}> Yes</label>
-  <label class="radio-label"><input type="radio" name="dual_diagnosis" value="false" ${val('dual_diagnosis') === 'false' ? 'checked' : ''}> No</label>
+  ${radio('dual_diagnosis','true','Yes')}
+  ${radio('dual_diagnosis','false','No')}
 </div></div>
 
 <div class="field"><label>Family programme?</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="has_family_programme" value="True" ${val('has_family_programme') === 'True' ? 'checked' : ''}> Yes</label>
-  <label class="radio-label"><input type="radio" name="has_family_programme" value="False" ${val('has_family_programme') === 'False' ? 'checked' : ''}> No</label>
+  ${radio('has_family_programme','True','Yes')}
+  ${radio('has_family_programme','False','No')}
 </div></div>
 
 <div class="field"><label>Mother and child service?</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="mother_child_service" value="true" ${val('mother_child_service') === 'true' ? 'checked' : ''}> Yes</label>
-  <label class="radio-label"><input type="radio" name="mother_child_service" value="false" ${val('mother_child_service') === 'false' ? 'checked' : ''}> No</label>
+  ${radio('mother_child_service','true','Yes')}
+  ${radio('mother_child_service','false','No')}
 </div></div>
 
 <div class="field"><label>Number of beds / capacity</label>
@@ -217,48 +232,120 @@ ${checkboxGroup('funding_types', FUNDING_TYPES)}
 <h2>7. Setting and ethos</h2>
 <div class="field"><label>Setting</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="setting" value="rural" ${sel('setting','rural')}> Rural</label>
-  <label class="radio-label"><input type="radio" name="setting" value="suburban" ${sel('setting','suburban')}> Suburban</label>
-  <label class="radio-label"><input type="radio" name="setting" value="urban" ${sel('setting','urban')}> Urban / city</label>
-  <label class="radio-label"><input type="radio" name="setting" value="coastal" ${sel('setting','coastal')}> Coastal</label>
+  ${radio('setting','rural','Rural')}
+  ${radio('setting','suburban','Suburban')}
+  ${radio('setting','urban','Urban / city')}
+  ${radio('setting','coastal','Coastal')}
+</div></div>
+
+<div class="field"><label>12-step programme?</label>
+<div class="radio-row">
+  ${radio('twelve_step','yes','Yes, 12-step based')}
+  ${radio('twelve_step','informed','12-step informed (uses principles but not strictly AA/NA)')}
+  ${radio('twelve_step','no','No, non-12-step')}
 </div></div>
 
 <div class="field"><label>Faith-based programme?</label>
 <div class="radio-row">
-  <label class="radio-label"><input type="radio" name="is_faith_based" value="True" ${val('is_faith_based') === 'True' ? 'checked' : ''}> Yes</label>
-  <label class="radio-label"><input type="radio" name="is_faith_based" value="False" ${val('is_faith_based') === 'False' ? 'checked' : ''}> No</label>
+  ${radio('is_faith_based','True','Yes')}
+  ${radio('is_faith_based','False','No')}
 </div></div>
 <div class="field" id="faith-tradition-row" style="${val('is_faith_based') === 'True' ? '' : 'display:none'}">
   <label>Faith tradition</label>
-  <input type="text" name="faith_tradition" value="${val('faith_tradition')}" placeholder="e.g. Christian, 12-step spiritual"></div>
+  <input type="text" name="faith_tradition" value="${val('faith_tradition')}" placeholder="e.g. Christian"></div>
 
 <div class="field"><label>Named therapies and modalities</label>
-  <input type="text" name="named_modalities" value="${val('named_modalities')}" placeholder="e.g. CBT, EMDR, 12-step, Trauma-informed, Mindfulness">
+  <input type="text" name="named_modalities" value="${val('named_modalities')}" placeholder="e.g. CBT, EMDR, Mindfulness, Trauma-informed">
   <div class="hint">Comma-separated</div></div>
 </div>
 
-<!-- 8. About -->
+<!-- 8. Photos -->
 <div class="section">
-<h2>8. About your clinic</h2>
-<div class="field"><label>Description (shown to people searching for treatment)</label>
-  <textarea name="description" rows="5" placeholder="Describe your clinic, your approach, and what makes it distinctive...">${val('description')}</textarea></div>
+<h2>8. Photos</h2>
+<p style="font-size:14px;color:#475569;margin-bottom:16px">Upload up to 5 photos of your clinic — reception, bedrooms, gardens, therapy rooms. JPG or PNG, max 5MB each.</p>
+<div class="field">
+  <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" multiple style="font-size:14px">
+  <div class="hint">Photos go to our team for review before publishing. They will not appear immediately.</div>
+</div>
+<div class="photo-list" id="photo-preview-list"></div>
+</div>
+
+<!-- 9. About -->
+<div class="section">
+<h2>9. About your clinic</h2>
+<div class="field">
+  <label>Description (shown to people searching for treatment)</label>
+  <textarea name="description" id="description-field" rows="6" maxlength="600" placeholder="Describe your clinic, your approach, and what makes it distinctive.
+
+Use a blank line between paragraphs.">${descriptionVal}</textarea>
+  <div class="char-count" id="desc-count">0 / 600 characters</div>
+  <div class="hint">Use a blank line between paragraphs. Maximum 600 characters.</div>
+</div>
 </div>
 
 <!-- Submit -->
 <div class="section">
-  <p style="font-size:13px;color:#64748b;margin-bottom:16px">By submitting this form you confirm that the information provided is accurate. Rehab Online will review your submission and may contact you to verify details.</p>
-  <div class="submit-row"><button type="submit" class="btn">${isUpdate ? 'Submit update for review' : 'Submit for review'}</button></div>
+  <p style="font-size:13px;color:#64748b;margin-bottom:16px">By submitting this form you confirm that the information provided is accurate. Rehab Online will review your submission and may contact you to verify details before publishing.</p>
+  <div class="submit-row"><button type="submit" class="btn" id="submit-btn">${isUpdate ? 'Submit update for review' : 'Submit for review'}</button></div>
 </div>
 
 </form>
 </div>
 
 <script>
-// Show/hide faith tradition field
+// Faith tradition toggle
 document.querySelectorAll('input[name="is_faith_based"]').forEach(function(r) {
   r.addEventListener('change', function() {
     document.getElementById('faith-tradition-row').style.display = this.value === 'True' ? '' : 'none';
   });
+});
+
+// Description character counter
+var descField = document.getElementById('description-field');
+var descCount = document.getElementById('desc-count');
+function updateCount() {
+  var n = descField.value.length;
+  descCount.textContent = n + ' / 600 characters';
+  descCount.className = 'char-count' + (n > 550 ? ' near' : '') + (n >= 600 ? ' full' : '');
+}
+descField.addEventListener('input', updateCount);
+updateCount();
+
+// Photo upload — convert to base64, store in hidden field
+var photoData = [];
+document.getElementById('photo-input').addEventListener('change', function(e) {
+  var files = Array.from(e.target.files).slice(0, 5);
+  photoData = [];
+  document.getElementById('photo-preview-list').innerHTML = '';
+  var pending = files.length;
+  if (!pending) return;
+  files.forEach(function(file) {
+    if (file.size > 5 * 1024 * 1024) { alert(file.name + ' is over 5MB and will be skipped.'); pending--; return; }
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      photoData.push({ name: file.name, data: ev.target.result });
+      var img = document.createElement('img');
+      img.src = ev.target.result;
+      img.className = 'photo-preview';
+      img.title = file.name;
+      document.getElementById('photo-preview-list').appendChild(img);
+      pending--;
+      if (pending === 0) {
+        document.getElementById('photo-data-hidden').value = JSON.stringify(photoData.map(function(p) { return { name: p.name, data: p.data.slice(0, 200) + '...' }; }));
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+});
+
+// On submit: inject full photo data
+document.querySelector('form').addEventListener('submit', function(e) {
+  if (photoData.length > 0) {
+    document.getElementById('photo-data-hidden').value = JSON.stringify(photoData);
+  }
+  var btn = document.getElementById('submit-btn');
+  btn.textContent = 'Submitting...';
+  btn.disabled = true;
 });
 </script>
 </body>
@@ -282,7 +369,7 @@ p{font-size:15px;color:#475569;line-height:1.6}
 </head>
 <body>
 <div class="card">
-  <div class="icon">✅</div>
+  <div class="icon">&#10003;</div>
   <h1>${isUpdate ? 'Update received' : 'Application received'}</h1>
   <p>${isUpdate
     ? 'Your updated details have been sent to the Rehab Online team for review. Changes will go live once approved, usually within 2 working days.'
