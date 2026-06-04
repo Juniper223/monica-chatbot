@@ -275,11 +275,11 @@ ${checkboxGroup('funding_types', FUNDING_TYPES)}
 <h2>9. About your clinic</h2>
 <div class="field">
   <label>Description (shown to people searching for treatment)</label>
-  <textarea name="description" id="description-field" rows="6" maxlength="600" placeholder="Describe your clinic, your approach, and what makes it distinctive.
+  <textarea name="description" id="description-field" rows="7" placeholder="Describe your clinic, your approach, and what makes it distinctive.
 
 Use a blank line between paragraphs.">${descriptionVal}</textarea>
-  <div class="char-count" id="desc-count">0 / 600 characters</div>
-  <div class="hint">Use a blank line between paragraphs. Maximum 600 characters.</div>
+  <div class="char-count" id="desc-count"></div>
+  <div class="hint">Use a blank line between paragraphs. Aim for 300-600 characters.</div>
 </div>
 </div>
 
@@ -305,8 +305,9 @@ var descField = document.getElementById('description-field');
 var descCount = document.getElementById('desc-count');
 function updateCount() {
   var n = descField.value.length;
-  descCount.textContent = n + ' / 600 characters';
-  descCount.className = 'char-count' + (n > 550 ? ' near' : '') + (n >= 600 ? ' full' : '');
+  if (n === 0) { descCount.textContent = ''; return; }
+  descCount.textContent = n + ' characters' + (n > 800 ? ' (consider trimming for best results)' : n > 600 ? ' (slightly long, trimming helps)' : '');
+  descCount.className = 'char-count' + (n > 800 ? ' full' : n > 600 ? ' near' : '');
 }
 descField.addEventListener('input', updateCount);
 updateCount();

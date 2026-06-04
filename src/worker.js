@@ -871,7 +871,7 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
       <div class="full"><label>Addictions treated</label><input id="f-addictions_treated" /></div>
       <div class="full"><label>Pricing (plain text)</label><input id="f-pricing_clean" /></div>
       <div class="full"><label>AI summary (what Monica says about this clinic)</label><textarea id="f-ai_summary" style="min-height:90px"></textarea></div>
-      <div class="full"><label>Description (max 600 chars)</label><textarea id="f-description" maxlength="600"></textarea></div>
+      <div class="full"><label>Description</label><textarea id="f-description"></textarea></div>
       <div class="trust-section full">
         <p>TRUST FIELDS - set by Rehab Online only, not shown to clinics in the public form</p>
         <div class="trust-grid">
