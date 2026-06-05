@@ -185,6 +185,7 @@ async function importCSV(event) {
 
 // ---- Pending queue ----
 var _pendingItems = [];
+var _reviewingId = null;
 var TYPE_BADGES = {
   new: '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">New application</span>',
   update: '<span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Update</span>',
@@ -231,6 +232,7 @@ async function loadPending() {
 
 function closePendingModal() { var el = document.getElementById('pending-overlay'); if (el) el.classList.remove('open'); }
 function openPendingReview(id) {
+  _reviewingId = id;
   var item = _pendingItems.find(function(i) { return i.id === id; });
   if (!item) return;
   var meta = item.meta || {};
@@ -250,22 +252,77 @@ function openPendingReview(id) {
     if (displayVal === 'True') displayVal = 'Yes';
     else if (displayVal === 'False') displayVal = 'No';
     var label = FIELD_LABELS[f] || f;
-    fieldRows += '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
+    var isWide = (f === 'description' || f === 'named_modalities' || f === 'addictions_treated' || f === 'mental_health_conditions' || f === 'treatment_types' || f === 'funding_types' || f === 'accreditations');
+    fieldRows += '<div style="margin-bottom:10px' + (isWide ? ';grid-column:1/-1' : '') + '"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
       (f === 'description' ? '<textarea id="pr-' + f + '" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(displayVal) + '</textarea>' : '<input id="pr-' + f + '" value="' + esc(displayVal) + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">') + '</div>';
   });
   var teamMembers = (_settingsCache && _settingsCache.team_members ? _settingsCache.team_members : 'Jennifer').split(',').map(function(s){return s.trim();});
   var memberOptions = '<option value="">Unassigned</option>' + teamMembers.map(function(m){return '<option value="'+esc(m)+'"'+(meta.assigned_to===m?' selected':'')+'>'+esc(m)+'</option>';}).join('');
-  var html = '<div style="padding-bottom:14px;border-bottom:1px solid #f1f5f9;margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">' + (TYPE_BADGES[meta.type||'update']||'') + (STATUS_BADGES[meta.status||'new']||'') + '<span style="font-size:12px;color:#94a3b8">'+(meta.submitted_at||'').slice(0,16).replace('T',' ')+'</span></div>' +
-    (meta.feedback_message ? '<div style="margin-bottom:14px;background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e"><strong>Previous feedback sent:</strong> '+esc(meta.feedback_message)+'</div>' : '') +
-    '<div style="display:grid;grid-template-columns:1fr 260px;gap:20px"><div><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Submitted data <span style="font-weight:400;color:#94a3b8;text-transform:none">(edit before approving)</span></p>' + fieldRows + '</div>' +
-    '<div><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Assignment</p><select id="pr-assign" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;margin-bottom:6px">' + memberOptions + '</select>' + (meta.assigned_at ? '<p style="font-size:12px;color:#94a3b8;margin-bottom:14px">Claimed '+meta.assigned_at.slice(0,10)+'</p>' : '') +
-    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:12px 0"><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Internal notes</p><textarea id="pr-internal-notes" rows="3" placeholder="Team-only notes, never sent to clinic..." style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">'+esc(meta.internal_notes||'')+'</textarea>' +
-    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:12px 0"><p style="font-size:12px;font-weight:600;color:#f59e0b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Trust fields</p><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Regulatory body</label><select id="pr-reg-body" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate Scotland</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (N. Ireland)</option></select></div><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Rating</label><select id="pr-reg-rating" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select></div><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Treats under-18s</label><select id="pr-under18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select></div><div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Minimum age</label><input id="pr-min-age" type="number" value="18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div></div></div>' +
-    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0"><p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">Actions</p>' +
-    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:10px"><p style="font-size:13px;font-weight:600;color:#166534;margin-bottom:6px">&#10003; Approve and publish</p><textarea id="pr-edit-summary" rows="2" placeholder="Note to clinic about edits (optional, leave blank if approving as submitted)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea><textarea id="pr-internal-edit-log" rows="2" placeholder="Internal edit log (not sent to clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn" style="background:#166534" onclick="submitApprove(' + JSON.stringify(id) + ')">Approve and go live</button></div>' +
-    '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;margin-bottom:10px"><p style="font-size:13px;font-weight:600;color:#854d0e;margin-bottom:6px">&#8635; Request changes</p><textarea id="pr-feedback" rows="3" placeholder="What needs to be changed or clarified? This message is sent to the clinic with a link to re-edit their submission..." style="width:100%;padding:8px 10px;border:1.5px solid #fde047;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn" style="background:#854d0e" onclick="submitRequestChanges(' + JSON.stringify(id) + ')">Send feedback and keep in pending</button></div>' +
-    '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:14px"><p style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:6px">&#10005; Reject</p><textarea id="pr-reject-reason" rows="2" placeholder="Reason for rejection (sent to the clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #fca5a5;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn danger" onclick="submitReject(' + JSON.stringify(id) + ')">Reject submission</button></div>';
-  document.getElementById('pending-modal-title').textContent = meta.title || sub.title || 'Review submission';
+  var teamMembers = (_settingsCache && _settingsCache.team_members ? _settingsCache.team_members : 'Jennifer').split(',').map(function(s){return s.trim();});
+  var memberOptions = '<option value="">Unassigned</option>' + teamMembers.map(function(m){return '<option value="'+esc(m)+'"'+(meta.assigned_to===m?' selected':'')+'>'+esc(m)+'</option>';}).join('');
+
+  var html =
+    // Top bar: type/status/date + assignment in one row
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid #f1f5f9;margin-bottom:18px">' +
+      (TYPE_BADGES[meta.type||'update']||'') + (STATUS_BADGES[meta.status||'new']||'') +
+      '<span style="font-size:12px;color:#94a3b8">'+(meta.submitted_at||'').slice(0,16).replace('T',' ')+'</span>' +
+      '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">' +
+        '<label style="font-size:12px;color:#64748b;font-weight:600">Assign to</label>' +
+        '<select id="pr-assign" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">' + memberOptions + '</select>' +
+      '</div>' +
+    '</div>' +
+    (meta.feedback_message ? '<div style="margin-bottom:16px;background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e"><strong>Previous feedback:</strong> '+esc(meta.feedback_message)+'</div>' : '') +
+
+    // Submitted fields — full width, clean two-col grid for compact fields
+    '<p style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Submitted data <span style="font-weight:400;color:#94a3b8;text-transform:none">(edit before approving)</span></p>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
+    fieldRows +
+    '</div>' +
+
+    // Trust fields — amber full-width block
+    '<div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:10px;padding:16px;margin-bottom:16px">' +
+      '<p style="font-size:11px;font-weight:600;color:#92400e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Trust fields - set by Rehab Online only</p>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px">' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Regulatory body</label>' +
+        '<select id="pr-reg-body" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (NI)</option></select></div>' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Rating</label>' +
+        '<select id="pr-reg-rating" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select></div>' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Treats under-18s</label>' +
+        '<select id="pr-under18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select></div>' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Minimum age</label>' +
+        '<input id="pr-min-age" type="number" value="18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Last inspection</label>' +
+        '<input id="pr-last-inspection" placeholder="e.g. Nov 2024" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
+      '</div>' +
+    '</div>' +
+
+    // Internal notes
+    '<div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px">Internal notes (team only, never sent to clinic)</label>' +
+    '<textarea id="pr-internal-notes" rows="2" placeholder="Notes visible to team only..." style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">'+esc(meta.internal_notes||'')+'</textarea></div>' +
+
+    // Actions
+    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0">' +
+    '<p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">Actions</p>' +
+    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:10px">' +
+      '<p style="font-size:13px;font-weight:600;color:#166534;margin-bottom:8px">&#10003; Approve and publish</p>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
+        '<textarea id="pr-edit-summary" rows="2" placeholder="Note to clinic about edits (optional)..." style="padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>' +
+        '<textarea id="pr-internal-edit-log" rows="2" placeholder="Internal edit log (not sent to clinic)..." style="padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>' +
+      '</div>' +
+      '<button class="btn" style="background:#166534" onclick="submitApprove(_reviewingId)">Approve and go live</button>' +
+    '</div>' +
+    '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;margin-bottom:10px">' +
+      '<p style="font-size:13px;font-weight:600;color:#854d0e;margin-bottom:8px">&#8635; Request changes</p>' +
+      '<textarea id="pr-feedback" rows="3" placeholder="What needs to be changed? Sent to clinic with a link to re-edit their submission..." style="width:100%;padding:8px 10px;border:1.5px solid #fde047;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
+      '<button class="btn" style="background:#854d0e" onclick="submitRequestChanges(_reviewingId)">Send feedback and keep in pending</button>' +
+    '</div>' +
+    '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:14px">' +
+      '<p style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:8px">&#10005; Reject</p>' +
+      '<textarea id="pr-reject-reason" rows="2" placeholder="Reason for rejection (sent to the clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #fca5a5;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
+      '<button class="btn danger" onclick="submitReject(_reviewingId)">Reject submission</button>' +
+    '</div>';
+
+    document.getElementById('pending-modal-title').textContent = meta.title || sub.title || 'Review submission';
   document.getElementById('pending-modal-body').innerHTML = html;
   document.getElementById('pending-modal-footer').innerHTML = '<button class="btn secondary" onclick="saveAssignment(' + JSON.stringify(id) + ')">' + 'Save assignment + notes</button> <button class="btn secondary" onclick="closePendingModal()">Close</button>';
   document.getElementById('pending-overlay').classList.add('open');
