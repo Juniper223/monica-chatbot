@@ -444,81 +444,105 @@ loadPending();
 
 // ---- Conversations ----
 var _convos = [];
+var _convosOffset = 0;
+var _convosTotal = 0;
+var _convoRendered = {};
 
 async function loadConvos() {
-  var r = await fetch('/admin/api/conversations?pw=' + PW);
-  _convos = await r.json();
+  _convosOffset = 0;
+  _convoRendered = {};
+  var r = await fetch('/admin/api/conversations?pw=' + PW + '&limit=20&offset=0');
+  var d = await r.json();
+  _convos = d.items || d;
+  _convosTotal = d.total || _convos.length;
+  _convosOffset = _convos.length;
+  var btn = document.getElementById('convos-tab-btn');
+  if (btn) btn.textContent = 'Conversations (' + _convosTotal + ')';
+  renderConvoList(true);
+}
+
+async function loadMoreConvos() {
+  var r = await fetch('/admin/api/conversations?pw=' + PW + '&limit=20&offset=' + _convosOffset);
+  var d = await r.json();
+  var newItems = d.items || [];
+  _convos = _convos.concat(newItems);
+  _convosOffset = _convos.length;
+  renderConvoList(false);
+}
+
+function renderConvoList(replace) {
   var el = document.getElementById('convos-list');
   if (!el) return;
-  var btn = document.getElementById('convos-tab-btn');
-  if (btn) btn.textContent = 'Conversations (' + _convos.length + ')';
   if (!_convos.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:14px;padding:20px 0">No conversations recorded yet.</p>'; return; }
-  el.innerHTML = _convos.map(function(c, i) {
+
+  var cards = _convos.map(function(c, i) {
     var date = c.ts ? c.ts.replace('T', ' ').slice(0, 16) : '';
-    var preview = (c.q || '').slice(0, 90) + ((c.q || '').length > 90 ? '...' : '');
-    return '<div class="convo-card" id="convo-' + i + '">' +
+    var preview = (c.q || '').slice(0, 100) + ((c.q || '').length > 100 ? '...' : '');
+    return '<div class="convo-card">' +
       '<div class="convo-head" onclick="toggleConvo(' + i + ')" style="cursor:pointer">' +
         '<div style="flex:1"><span style="font-size:12px;color:#94a3b8;margin-right:10px">' + date + '</span>' +
         '<span style="font-size:13px;color:#1e293b">' + esc(preview) + '</span></div>' +
-        '<span id="toggle-' + i + '" style="color:#94a3b8;font-size:12px;flex-shrink:0;padding-left:12px">&#9656;</span>' +
+        '<span id="toggle-' + i + '" style="color:#94a3b8;font-size:12px;padding-left:12px;flex-shrink:0">&#9656;</span>' +
       '</div>' +
-      '<div id="body-' + i + '" style="display:none;padding:16px 0 4px;border-top:1px solid #f1f5f9;margin-top:10px">' +
-        '<div style="background:#f8fafc;border-radius:8px;padding:12px 14px;margin-bottom:10px">' +
-          '<div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Visitor</div>' +
-          '<div style="font-size:13px;line-height:1.6">' + esc(c.q || '') + '</div>' +
-        '</div>' +
-        '<div style="background:#eef2ff;border-radius:8px;padding:12px 14px">' +
-          '<div style="font-size:11px;font-weight:600;color:#4f5fe8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Monica</div>' +
-          '<div style="font-size:13px;line-height:1.7" id="monica-' + i + '"></div>' +
-        '</div>' +
+      '<div id="body-' + i + '" style="display:none;padding:14px 0 4px;border-top:1px solid #f1f5f9;margin-top:10px">' +
+        '<div style="background:#f8fafc;border-radius:8px;padding:12px 14px;margin-bottom:10px"><div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Visitor</div><div style="font-size:13px;line-height:1.6">' + esc(c.q || '') + '</div></div>' +
+        '<div style="background:#eef2ff;border-radius:8px;padding:12px 14px"><div style="font-size:11px;font-weight:600;color:#4f5fe8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Monica</div><div style="font-size:13px;line-height:1.7" id="monica-' + i + '"><span style="color:#94a3b8;font-style:italic">Click to load...</span></div></div>' +
       '</div>' +
     '</div>';
   }).join('');
-  // Render Monica text with basic markdown after DOM is built
-  _convos.forEach(function(c, i) {
-    var el2 = document.getElementById('monica-' + i);
-    if (el2) el2.innerHTML = renderMonicaText(c.a || '');
-  });
-}
 
-function renderMonicaText(text) {
-  if (!text) return '';
-  // Parse links [text](url) manually — no regex to avoid template literal escaping issues
-  var out = '';
-  var i = 0;
-  while (i < text.length) {
-    if (text[i] === '[') {
-      var cb = text.indexOf(']', i);
-      if (cb > i && text[cb + 1] === '(') {
-        var cp = text.indexOf(')', cb + 2);
-        if (cp > cb + 2) {
-          var linkText = esc(text.slice(i + 1, cb));
-          var linkUrl = text.slice(cb + 2, cp);
-          if (linkUrl.slice(0, 4) === 'http') {
-            out += '<a href="' + esc(linkUrl) + '" target="_blank" style="color:#4f5fe8;font-weight:500">' + linkText + ' &#8599;</a>';
-            i = cp + 1; continue;
-          }
-        }
-      }
-    }
-    out += esc(text[i]);
-    i++;
+  var loadMoreBtn = _convosOffset < _convosTotal
+    ? '<button class="btn secondary" style="width:100%;margin-top:12px" onclick="loadMoreConvos()">Load more (' + (_convosTotal - _convosOffset) + ' remaining)</button>'
+    : '';
+
+  if (replace) {
+    el.innerHTML = cards + loadMoreBtn;
+  } else {
+    var existing = el.querySelector('button');
+    if (existing) existing.remove();
+    el.insertAdjacentHTML('beforeend', cards + loadMoreBtn);
   }
-  // Bold **text** — split on ** and alternate
-  var boldParts = out.split('**');
-  out = boldParts.map(function(p, idx) { return idx % 2 === 1 ? '<strong>' + p + '</strong>' : p; }).join('');
-  // Newlines
-  out = out.split('\\n\\n').join('</p><p style="margin-top:8px">');
-  out = out.split('\\n').join('<br>');
-  return '<p>' + out + '</p>';
 }
 
 function toggleConvo(i) {
   var body = document.getElementById('body-' + i);
   var toggle = document.getElementById('toggle-' + i);
-  var open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : 'block';
-  toggle.innerHTML = open ? '&#9656;' : '&#9662;';
+  var open = body && body.style.display !== 'none';
+  if (body) body.style.display = open ? 'none' : 'block';
+  if (toggle) toggle.innerHTML = open ? '&#9656;' : '&#9662;';
+  // Lazy render Monica text on first open
+  if (!open && !_convoRendered[i]) {
+    _convoRendered[i] = true;
+    var monicaEl = document.getElementById('monica-' + i);
+    if (monicaEl && _convos[i]) monicaEl.innerHTML = renderMonicaText(_convos[i].a || '');
+  }
+}
+
+function renderMonicaText(text) {
+  if (!text) return '<em style="color:#94a3b8">No response recorded</em>';
+  var out = esc(text);
+  out = out.split('**').map(function(p, idx) { return idx % 2 === 1 ? '<strong>' + p + '</strong>' : p; }).join('');
+  // Parse [text](url) links manually
+  var result = '';
+  var i = 0;
+  while (i < out.length) {
+    if (out[i] === '[') {
+      var cb = out.indexOf(']', i);
+      if (cb > i && out[cb+1] === '(') {
+        var cp = out.indexOf(')', cb+2);
+        if (cp > cb+2) {
+          var linkText = out.slice(i+1, cb);
+          var linkUrl = out.slice(cb+2, cp);
+          if (linkUrl.slice(0,4) === 'http') {
+            result += '<a href="' + linkUrl + '" target="_blank" style="color:#4f5fe8;font-weight:500">' + linkText + ' &#8599;</a>';
+            i = cp + 1; continue;
+          }
+        }
+      }
+    }
+    result += out[i]; i++;
+  }
+  return '<p>' + result.split('\\n\\n').join('</p><p style="margin-top:8px">').split('\\n').join('<br>') + '</p>';
 }
 
 function exportConvos() {
@@ -546,7 +570,14 @@ async function loadSettings() {
   if (tl) {
     tl.innerHTML = TEMPLATE_KEYS.map(function(key) {
       var tmpl = (_settingsCache.templates || {})[key] || {};
-      return '<div style="margin-bottom:18px;background:#f8fafc;border-radius:10px;padding:16px"><p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">' + esc(TEMPLATE_LABELS[key]||key) + '</p>' +
+      return '<div style="margin-bottom:18px;background:#f8fafc;border-radius:10px;padding:16px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
+          '<p style="font-size:13px;font-weight:600;color:#1e293b">' + esc(TEMPLATE_LABELS[key]||key) + '</p>' +
+          '<div style="display:flex;gap:8px;align-items:center">' +
+            '<input type="email" id="test-to-' + key + '" placeholder="Send test to..." style="padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:12px;font-family:inherit;width:180px">' +
+            '<button class="btn sm secondary" data-tkey="' + key + '" onclick="sendTestEmail(this.dataset.tkey)">Send test</button>' +
+          '</div>' +
+        '</div>' +
         '<div style="margin-bottom:8px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Subject</label><input data-tmpl="' + key + '" data-field="subject" value="' + esc(tmpl.subject||'') + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit"></div>' +
         '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Body</label><textarea data-tmpl="' + key + '" data-field="body" rows="5" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(tmpl.body||'') + '</textarea></div></div>';
     }).join('');
@@ -574,5 +605,21 @@ async function saveSettings() {
 
 // Load settings early so team members list is ready for pending assignment
 loadSettings();
+
+async function sendTestEmail(key) {
+  var toEl = document.getElementById('test-to-' + key);
+  var to = toEl ? toEl.value.trim() : '';
+  if (!to || !to.includes('@')) { alert('Enter a valid email address first.'); return; }
+  toEl.disabled = true;
+  var r = await fetch('/admin/api/test-email?pw=' + PW, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({template_key: key, to: to})
+  });
+  var d = await r.json();
+  toEl.disabled = false;
+  if (d.ok) { toEl.value = ''; alert('Test email sent to ' + to); }
+  else if (d.reason === 'no_resend_key') { alert('Resend API key not set yet.'); }
+  else { alert('Sent (check inbox). Status: ' + (d.status || 'unknown')); }
+}
 
 `;

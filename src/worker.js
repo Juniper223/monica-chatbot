@@ -731,8 +731,11 @@ async function handleAdmin(request, env, url) {
   if (url.pathname === "/admin/api/conversations") {
     const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
     const raw = env.ANALYTICS ? await env.ANALYTICS.get("recent:conversations") : null;
-    const convos = raw ? JSON.parse(raw) : [];
-    return new Response(JSON.stringify(convos), { status: 200, headers });
+    const all = raw ? JSON.parse(raw) : [];
+    const limit = parseInt(url.searchParams.get("limit") || "20");
+    const offset = parseInt(url.searchParams.get("offset") || "0");
+    const page = all.slice(offset, offset + limit);
+    return new Response(JSON.stringify({ items: page, total: all.length, offset, limit }), { status: 200, headers });
   }
 
   // Pending queue API
@@ -861,6 +864,21 @@ async function handleAdmin(request, env, url) {
     }
 
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Test email API
+  if (url.pathname === "/admin/api/test-email" && request.method === "POST") {
+    const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+    const { template_key, to } = await request.json();
+    const dummyVars = {
+      clinic_name: "Test Clinic", form_link: url.origin + "/form/test-clinic",
+      portal_link: url.origin + "/form/test-clinic", listing_url: "https://rehab-online.org.uk/clinics/test",
+      feedback_message: "Please update your phone number and add a description.",
+      edit_summary: "We updated your phone number format.", reject_reason: "This listing does not meet our criteria.",
+      portal_password: "example-pass-42", submitted_at: new Date().toISOString().slice(0, 16).replace("T", " "),
+    };
+    const result = await sendEmail(env, template_key, to, dummyVars);
+    return new Response(JSON.stringify(result), { status: 200, headers });
   }
 
   // Settings API
