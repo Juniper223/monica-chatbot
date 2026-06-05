@@ -81,13 +81,13 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '<title>' + (isUpdate ? 'Update your listing' : 'Apply for a listing') + ' | Rehab Online</title>\n' +
 '<link rel="icon" href="' + FAVICON + '">\n' +
 '<style>\n' +
-':root{--navy:#141a5b;--navy-dk:#0d1240;--navy-tint:rgba(20,26,91,.05);--gold:#b5860a;--bg:#faf9f7;--white:#fff;--border:#e4dfd8;--border-focus:#141a5b;--text:#1a1a2e;--text2:#606880;--muted:#9ca3b0;--card-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);--sidebar:220px}\n' +
+':root{--navy:#141a5b;--navy-dk:#0d1240;--navy-header:#080e2a;--navy-tint:rgba(20,26,91,.05);--gold:#b5860a;--bg:#faf9f7;--white:#fff;--border:#e4dfd8;--border-focus:#141a5b;--text:#1a1a2e;--text2:#606880;--muted:#9ca3b0;--card-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);--sidebar:220px}\n' +
 '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}\n' +
 'html{scroll-behavior:smooth}\n' +
 'body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding-bottom:80px}\n' +
 
 /* Header */
-'.header{background:var(--navy);padding:18px 32px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:300}\n' +
+'.header{background:var(--navy-header);padding:18px 32px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:300}\n' +
 '.header img{height:36px;filter:brightness(0) invert(1)}\n' +
 '.header-divider{width:1px;height:28px;background:rgba(255,255,255,.2);margin:0 4px}\n' +
 '.header-title{color:rgba(255,255,255,.85);font-size:14px;font-weight:500}\n' +
@@ -122,10 +122,11 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '.error-box{background:#fef2f2;border:1px solid #fca5a5;border-left:3px solid #ef4444;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px}\n' +
 
 /* Section cards */
-'.section{background:var(--white);border:1px solid var(--border);border-radius:12px;padding:28px;margin-bottom:16px;box-shadow:var(--card-shadow);scroll-margin-top:120px}\n' +
-'.section-head{display:flex;align-items:center;gap:12px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}\n' +
-'.snum{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}\n' +
-'.section h2{font-size:15px;font-weight:600;color:var(--text)}\n' +
+'.section{background:var(--white);border:1px solid var(--border);border-radius:14px;padding:32px;margin-bottom:20px;box-shadow:var(--card-shadow);scroll-margin-top:120px;transition:border-color .2s}\n' +
+'.section:focus-within{border-color:rgba(20,26,91,.25)}\n' +
+'.section-head{display:flex;align-items:center;gap:12px;margin-bottom:26px;padding-bottom:18px;border-bottom:1px solid var(--border)}\n' +
+'.snum{width:28px;height:28px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;letter-spacing:-.5px}\n' +
+'.section h2{font-size:16px;font-weight:600;color:var(--text);letter-spacing:-.01em}\n' +
 
 /* Fields */
 '.field{margin-bottom:20px}.field:last-child{margin-bottom:0}\n' +
@@ -162,9 +163,9 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 /* Submit */
 '.submit-wrap{padding:8px 0 24px;text-align:center}\n' +
 '.submit-wrap p{font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.6;max-width:480px;margin-left:auto;margin-right:auto}\n' +
-'.btn-submit{background:var(--navy);color:#fff;border:none;padding:15px 52px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;letter-spacing:.01em}\n' +
-'.btn-submit:hover{background:var(--navy-dk);transform:translateY(-1px)}\n' +
-'.btn-submit:disabled{opacity:.55;cursor:not-allowed;transform:none}\n' +
+'.btn-submit{background:var(--navy);color:#fff;border:none;padding:16px 56px;border-radius:99px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s,box-shadow .15s,transform .1s;letter-spacing:.02em;box-shadow:0 4px 16px rgba(20,26,91,.3)}\n' +
+'.btn-submit:hover{background:var(--navy-dk);transform:translateY(-1px);box-shadow:0 6px 20px rgba(20,26,91,.4)}\n' +
+'.btn-submit:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}\n' +
 
 /* Responsive */
 '@media(max-width:767px){' +
