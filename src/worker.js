@@ -429,12 +429,18 @@ async function logConversation(env, userMsg, reply, userTurnCount) {
     await inc(env, `depth:${Math.min(userTurnCount, 6)}`);
   }
 
-  // Recent conversations log
-  const snippet = { ts: new Date().toISOString(), q: userMsg.slice(0, 120) };
+  // Full conversation log — store user message + Monica's response
+  const entry = {
+    ts: new Date().toISOString(),
+    id: crypto.randomUUID().slice(0, 8),
+    q: userMsg,
+    a: reply,
+    turn: userTurnCount || 1,
+  };
   const raw = await env.ANALYTICS.get("recent:conversations");
   const recent = raw ? JSON.parse(raw) : [];
-  recent.unshift(snippet);
-  if (recent.length > 50) recent.pop();
+  recent.unshift(entry);
+  if (recent.length > 200) recent.pop();
   await env.ANALYTICS.put("recent:conversations", JSON.stringify(recent));
 }
 
@@ -564,6 +570,14 @@ async function handleAdmin(request, env, url) {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
     }
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Conversations API
+  if (url.pathname === "/admin/api/conversations") {
+    const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+    const raw = env.ANALYTICS ? await env.ANALYTICS.get("recent:conversations") : null;
+    const convos = raw ? JSON.parse(raw) : [];
+    return new Response(JSON.stringify(convos), { status: 200, headers });
   }
 
   // Pending queue API
@@ -783,6 +797,8 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
 .trust-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .modal-footer{margin-top:20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #f1f5f9;padding-top:16px;flex-shrink:0}
 .empty{color:#94a3b8;font-size:14px;padding:40px;text-align:center}
+.convo-card{background:#fff;border-radius:10px;padding:14px 18px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+.convo-head{display:flex;align-items:center;gap:8px;user-select:none}
 </style>
 </head><body>
 <header>
@@ -791,6 +807,7 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <button class="active" onclick="showTab('analytics',this)">Analytics</button>
     <button onclick="showTab('clinics',this)">Clinics</button>
     <button onclick="showTab('pending',this)" id="pending-tab-btn">Pending</button>
+    <button onclick="showTab('convos',this)" id="convos-tab-btn">Conversations</button>
   </nav>
 </header>
 <main>
@@ -837,6 +854,15 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <button class="btn secondary" onclick="generateNewLink()">+ Generate new clinic link</button>
   </div>
   <div id="pending-list"><p style="color:#94a3b8;font-size:14px">Loading...</p></div>
+</div>
+
+<div id="tab-convos" class="tab">
+  <div class="toolbar" style="margin-bottom:16px">
+    <span style="font-size:14px;color:#64748b">Full conversation history (last 200)</span>
+    <button class="btn secondary" onclick="loadConvos()" style="margin-left:auto">Refresh</button>
+    <button class="btn secondary" onclick="exportConvos()">Export markdown</button>
+  </div>
+  <div id="convos-list"><p style="color:#94a3b8;font-size:14px">Loading...</p></div>
 </div>
 
 </main>

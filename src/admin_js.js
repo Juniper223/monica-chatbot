@@ -290,4 +290,94 @@ function showLink(title, link, expiry) {
 
 renderClinics(allClinics);
 loadPending();
+
+// ---- Conversations ----
+var _convos = [];
+
+async function loadConvos() {
+  var r = await fetch('/admin/api/conversations?pw=' + PW);
+  _convos = await r.json();
+  var el = document.getElementById('convos-list');
+  if (!el) return;
+  var btn = document.getElementById('convos-tab-btn');
+  if (btn) btn.textContent = 'Conversations (' + _convos.length + ')';
+  if (!_convos.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:14px;padding:20px 0">No conversations recorded yet.</p>'; return; }
+  el.innerHTML = _convos.map(function(c, i) {
+    var date = c.ts ? c.ts.replace('T', ' ').slice(0, 16) : '';
+    var preview = (c.q || '').slice(0, 90) + ((c.q || '').length > 90 ? '...' : '');
+    return '<div class="convo-card" id="convo-' + i + '">' +
+      '<div class="convo-head" onclick="toggleConvo(' + i + ')" style="cursor:pointer">' +
+        '<div style="flex:1"><span style="font-size:12px;color:#94a3b8;margin-right:10px">' + date + '</span>' +
+        '<span style="font-size:13px;color:#1e293b">' + esc(preview) + '</span></div>' +
+        '<span id="toggle-' + i + '" style="color:#94a3b8;font-size:12px;flex-shrink:0;padding-left:12px">&#9656;</span>' +
+      '</div>' +
+      '<div id="body-' + i + '" style="display:none;padding:16px 0 4px;border-top:1px solid #f1f5f9;margin-top:10px">' +
+        '<div style="background:#f8fafc;border-radius:8px;padding:12px 14px;margin-bottom:10px">' +
+          '<div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Visitor</div>' +
+          '<div style="font-size:13px;line-height:1.6">' + esc(c.q || '') + '</div>' +
+        '</div>' +
+        '<div style="background:#eef2ff;border-radius:8px;padding:12px 14px">' +
+          '<div style="font-size:11px;font-weight:600;color:#4f5fe8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Monica</div>' +
+          '<div style="font-size:13px;line-height:1.7" id="monica-' + i + '"></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  // Render Monica text with basic markdown after DOM is built
+  _convos.forEach(function(c, i) {
+    var el2 = document.getElementById('monica-' + i);
+    if (el2) el2.innerHTML = renderMonicaText(c.a || '');
+  });
+}
+
+function renderMonicaText(text) {
+  if (!text) return '';
+  // Parse links [text](url) manually — no regex to avoid template literal escaping issues
+  var out = '';
+  var i = 0;
+  while (i < text.length) {
+    if (text[i] === '[') {
+      var cb = text.indexOf(']', i);
+      if (cb > i && text[cb + 1] === '(') {
+        var cp = text.indexOf(')', cb + 2);
+        if (cp > cb + 2) {
+          var linkText = esc(text.slice(i + 1, cb));
+          var linkUrl = text.slice(cb + 2, cp);
+          if (linkUrl.slice(0, 4) === 'http') {
+            out += '<a href="' + esc(linkUrl) + '" target="_blank" style="color:#4f5fe8;font-weight:500">' + linkText + ' &#8599;</a>';
+            i = cp + 1; continue;
+          }
+        }
+      }
+    }
+    out += esc(text[i]);
+    i++;
+  }
+  // Bold **text** — split on ** and alternate
+  var boldParts = out.split('**');
+  out = boldParts.map(function(p, idx) { return idx % 2 === 1 ? '<strong>' + p + '</strong>' : p; }).join('');
+  // Newlines
+  out = out.split('\\n\\n').join('</p><p style="margin-top:8px">');
+  out = out.split('\\n').join('<br>');
+  return '<p>' + out + '</p>';
+}
+
+function toggleConvo(i) {
+  var body = document.getElementById('body-' + i);
+  var toggle = document.getElementById('toggle-' + i);
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  toggle.innerHTML = open ? '&#9656;' : '&#9662;';
+}
+
+function exportConvos() {
+  if (!_convos.length) { alert('No conversations to export.'); return; }
+  var lines = ['# Monica Conversations Export', ''];
+  _convos.forEach(function(c) {
+    var date = c.ts ? c.ts.replace('T', ' ').slice(0, 16) : '';
+    lines.push('---', '', '**' + date + '**', '', '**Visitor:** ' + (c.q || ''), '', '**Monica:** ' + (c.a || ''), '');
+  });
+  var blob = new Blob([lines.join('\\n')], { type: 'text/markdown' });
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'monica-conversations.md'; a.click();
+}
 `;
