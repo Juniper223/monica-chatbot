@@ -39,7 +39,7 @@ function renderClinics(list) {
       '<td style="font-size:11px;color:#64748b">' + (c.treats_under_18s && c.treats_under_18s !== 'no' ? '<span style="color:#7c3aed;font-weight:600">' + esc(c.treats_under_18s) + '</span>' : '18+') + '</td>' +
       '<td>' +
         '<button class="btn sm" onclick="openModal(' + c.id + ')">Edit</button> ' +
-        (c.slug && c.portal_password ? '<button class="btn sm secondary" onclick="copyLogin(\'' + esc(c.slug) + '\',\'' + esc(c.portal_password) + '\',\'' + esc(c.title||'') + '\')" title="Copy portal login URL">Login</button> ' : '') +
+        (c.slug && c.portal_password ? '<button class="btn sm secondary" onclick="copyLogin(' + c.id + ')" title="Copy portal login URL">Login</button> ' : '') +
         '<button class="btn sm secondary" onclick="genLink(' + c.id + ')" title="One-time update link (30 days)">Link</button> ' +
         '<button class="btn sm danger" onclick="del(' + c.id + ')">Del</button>' +
       '</td>' +
@@ -253,11 +253,13 @@ async function rejectPending(id) {
 }
 
 // ---- Link generation ----
-function copyLogin(slug, password, title) {
+function copyLogin(id) {
+  var clinic = allClinics.find(function(c) { return c.id === id; });
+  if (!clinic || !clinic.slug || !clinic.portal_password) return;
   var base = window.location.origin;
-  var url = base + '/form/' + slug + '?pw=' + encodeURIComponent(password);
+  var url = base + '/form/' + clinic.slug + '?pw=' + encodeURIComponent(clinic.portal_password);
   navigator.clipboard.writeText(url).then(function() {
-    showLink('Portal login for ' + (title || slug), url, null);
+    showLink('Portal login for ' + (clinic.title || clinic.slug), url, null);
   });
 }
 
