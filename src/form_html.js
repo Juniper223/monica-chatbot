@@ -80,11 +80,14 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n' +
 '<title>' + (isUpdate ? 'Update your listing' : 'Apply for a listing') + ' | Rehab Online</title>\n' +
 '<link rel="icon" href="' + FAVICON + '">\n' +
+'<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
+'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n' +
+'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">\n' +
 '<style>\n' +
 ':root{--navy:#141a5b;--navy-dk:#0d1240;--navy-header:#080e2a;--navy-tint:rgba(20,26,91,.05);--gold:#b5860a;--bg:#faf9f7;--white:#fff;--border:#e4dfd8;--border-focus:#141a5b;--text:#1a1a2e;--text2:#606880;--muted:#9ca3b0;--card-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);--sidebar:220px}\n' +
 '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}\n' +
 'html{scroll-behavior:smooth}\n' +
-'body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding-bottom:80px}\n' +
+'body{font-family:"Inter",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding-bottom:80px}\n' +
 
 /* Header */
 '.header{background:var(--navy-header);padding:18px 32px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:300}\n' +
@@ -147,11 +150,12 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '.pill-check input,.pill-radio input{display:none}\n' +
 
 /* Upload zones */
-'.upload-zone{border:2px dashed var(--border);border-radius:10px;padding:28px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s}\n' +
-'.upload-zone:hover,.upload-zone.over{border-color:var(--navy);background:var(--navy-tint)}\n' +
-'.upload-icon{font-size:28px;margin-bottom:8px;opacity:.5}\n' +
+'.upload-zone{border:1.5px dashed var(--border);border-radius:12px;padding:32px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg)}\n' +
+'.upload-zone:hover,.upload-zone.over{border-color:var(--navy);background:var(--white);box-shadow:0 0 0 3px rgba(20,26,91,.08)}\n' +
+'.upload-icon{width:44px;height:44px;border-radius:10px;background:var(--white);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)}\n' +
 '.upload-zone p{font-size:13px;color:var(--text2);line-height:1.6}\n' +
-'.upload-zone strong{color:var(--text)}\n' +
+'.upload-zone strong{color:var(--navy);font-weight:600}\n' +
+'.upload-zone .browse{display:inline-block;margin-top:10px;padding:7px 18px;border-radius:99px;border:1.5px solid var(--border);font-size:12px;font-weight:600;color:var(--text2);background:var(--white);pointer-events:none}\n' +
 '.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px}\n' +
 '.photo-thumb{aspect-ratio:4/3;object-fit:cover;border-radius:8px;border:1px solid var(--border)}\n' +
 '.logo-thumb{max-height:72px;max-width:180px;object-fit:contain;border-radius:8px;border:1px solid var(--border);padding:8px;margin-top:10px;background:var(--white)}\n' +
@@ -182,7 +186,10 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '<header class="header">\n' +
 '  <img src="' + LOGO_URL + '" alt="Rehab Online" onerror="this.style.display=\'none\'">\n' +
 '  <div class="header-divider"></div>\n' +
-'  <span class="header-title">' + (isUpdate ? 'Update your listing' : 'Clinic application portal') + '</span>\n' +
+'  <div>\n' +
+'    <div class="header-title">' + (isUpdate ? 'Update your listing' : 'Clinic application portal') + '</div>\n' +
+'    <div style="font-size:11.5px;color:rgba(255,255,255,.45);margin-top:1px">Takes about 10 minutes &middot; Reviewed before publishing</div>\n' +
+'  </div>\n' +
 '</header>\n' +
 
 '<div class="mob-progress" id="mob-progress">\n' +
@@ -192,7 +199,14 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 
 '<div class="layout">\n' +
 '<aside class="sidebar">\n' +
-'  <div class="sidebar-inner">' + sidebarItems + '</div>\n' +
+'  <div class="sidebar-inner">' + sidebarItems + '\n' +
+'  <div style="padding:12px 16px;border-top:1px solid var(--border);background:var(--bg)">' +
+'    <div style="font-size:11px;color:var(--muted);font-weight:500;letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px">Progress</div>' +
+'    <div style="height:4px;background:var(--border);border-radius:99px;overflow:hidden">' +
+'      <div id="sidebar-progress-bar" style="height:100%;background:var(--navy);border-radius:99px;width:10%;transition:width .4s"></div>' +
+'    </div>' +
+'    <div id="sidebar-progress-text" style="font-size:12px;color:var(--text2);margin-top:5px">1 of 10 sections</div>' +
+'  </div></div>\n' +
 '</aside>\n' +
 
 '<div class="form-area">\n' +
@@ -280,14 +294,18 @@ radio('twelve_step','yes','Yes, 12-step based') + radio('twelve_step','informed'
 /* S8 */
 '<div class="section" id="s8">' + sectionHead(8, 'Photos and logo') +
 '<div class="field"><label>Clinic photos (up to 5)</label>' +
-'<div class="upload-zone" id="photo-drop"><div class="upload-icon">&#128444;</div>' +
-'<p><strong>Drop photos here</strong> or click to browse<br>JPG or PNG, max 5MB each</p>' +
+'<div class="upload-zone" id="photo-drop">' +
+'<div class="upload-icon">&#128444;</div>' +
+'<p><strong>Drop photos here</strong><br>JPG or PNG, max 5MB each</p>' +
+'<span class="browse">Browse files</span>' +
 '<input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" multiple style="display:none"></div>' +
 '<div class="photo-grid" id="photo-preview"></div>' +
 '<div class="hint">Photos are reviewed before publishing. Show your reception, bedrooms, gardens, therapy rooms.</div></div>' +
 '<div class="field" style="margin-top:24px"><label>Your clinic logo</label>' +
-'<div class="upload-zone" id="logo-drop" style="max-width:380px"><div class="upload-icon">&#127991;</div>' +
-'<p><strong>Drop your logo here</strong> or click to browse<br>PNG or SVG preferred, transparent background ideal</p>' +
+'<div class="upload-zone" id="logo-drop" style="max-width:380px">' +
+'<div class="upload-icon">&#127991;</div>' +
+'<p><strong>Drop your logo here</strong><br>PNG or SVG, transparent background ideal</p>' +
+'<span class="browse">Browse files</span>' +
 '<input type="file" id="logo-input" accept="image/png,image/svg+xml,image/jpeg" style="display:none"></div>' +
 '<div id="logo-preview"></div>' +
 '<div class="hint">Displayed on your listing page alongside your clinic name.</div></div>' +
@@ -342,7 +360,8 @@ radio('twelve_step','yes','Yes, 12-step based') + radio('twelve_step','informed'
 'var sids=' + sectionIds + ';\n' +
 'var navEls={};sids.forEach(function(id){var el=document.querySelector(".nav-item[data-target=\\""+id+"\\"]");if(el)navEls[id]=el;});\n' +
 'var mobStep=document.getElementById("mob-step"),mobCount=document.getElementById("mob-count"),mobFill=document.getElementById("mob-fill");\n' +
-'var obs=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting){var id=e.target.id,idx=sids.indexOf(id);Object.values(navEls).forEach(function(n){n.classList.remove("active");});if(navEls[id]){navEls[id].classList.add("active");navEls[id].scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"});}if(mobStep)mobStep.textContent=e.target.querySelector("h2")?e.target.querySelector("h2").textContent:"";if(mobCount)mobCount.textContent=(idx+1)+" of "+sids.length;if(mobFill)mobFill.style.width=Math.round((idx+1)/sids.length*100)+"%";}});},{threshold:0.25});\n' +
+'var sidebarBar=document.getElementById("sidebar-progress-bar"),sidebarTxt=document.getElementById("sidebar-progress-text");\n' +
+'var obs=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting){var id=e.target.id,idx=sids.indexOf(id);Object.values(navEls).forEach(function(n){n.classList.remove("active");});if(navEls[id]){navEls[id].classList.add("active");navEls[id].scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"});}var pct=Math.round((idx+1)/sids.length*100);if(mobStep)mobStep.textContent=e.target.querySelector("h2")?e.target.querySelector("h2").textContent:"";if(mobCount)mobCount.textContent=(idx+1)+" of "+sids.length;if(mobFill)mobFill.style.width=pct+"%";if(sidebarBar)sidebarBar.style.width=pct+"%";if(sidebarTxt)sidebarTxt.textContent=(idx+1)+" of "+sids.length+" sections";}});},{threshold:0.25});\n' +
 'sids.forEach(function(id){var el=document.getElementById(id);if(el)obs.observe(el);});\n' +
 
 /* Submit */

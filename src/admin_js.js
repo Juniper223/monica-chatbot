@@ -269,8 +269,11 @@ function showLink(title, link, expiry) {
   var exDate = new Date(expiry).toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'});
   document.getElementById('link-modal-body').innerHTML =
     '<p style="font-size:13px;color:#64748b;margin-bottom:12px">Send this to the clinic. Expires ' + exDate + '.</p>' +
-    '<textarea id="link-text" style="width:100%;height:80px;font-size:12px;font-family:monospace;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;resize:none" readonly>' + esc(link) + '</textarea>' +
-    '<button class="btn" style="margin-top:10px;width:100%" onclick="navigator.clipboard.writeText(document.getElementById(\\'link-text\\').value).then(function(){ this.textContent=\\'Copied!\\'; }.bind(this))">Copy link</button>';
+    '<textarea id="link-text" style="width:100%;height:72px;font-size:11.5px;font-family:monospace;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;resize:none;color:#334155" readonly>' + esc(link) + '</textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:10px">' +
+    '<button class="btn" style="flex:1" onclick="navigator.clipboard.writeText(document.getElementById(\\'link-text\\').value).then(function(){ this.textContent=\\'Copied!\\'; }.bind(this))">Copy link</button>' +
+    '<a href="' + esc(link) + '" target="_blank" class="btn secondary" style="flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">Open to test &rarr;</a>' +
+    '</div>';
   document.getElementById('link-overlay').classList.add('open');
 }
 
