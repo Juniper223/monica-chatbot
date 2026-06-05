@@ -589,13 +589,13 @@ async function logConversation(env, userMsg, reply, userTurnCount) {
     ts: new Date().toISOString(),
     id: crypto.randomUUID().slice(0, 8),
     q: userMsg,
-    a: reply,
+    a: reply.slice(0, 600),
     turn: userTurnCount || 1,
   };
   const raw = await env.ANALYTICS.get("recent:conversations");
   const recent = raw ? JSON.parse(raw) : [];
   recent.unshift(entry);
-  if (recent.length > 200) recent.pop();
+  if (recent.length > 100) recent.pop();
   await env.ANALYTICS.put("recent:conversations", JSON.stringify(recent));
 }
 
@@ -933,7 +933,7 @@ async function buildAdminPage(pw, env) {
   const results = await Promise.all([
     env.ANALYTICS ? env.ANALYTICS.get("total:conversations") : null,           // 0
     env.ANALYTICS ? env.ANALYTICS.get("total:crisis_triggers") : null,          // 1
-    env.ANALYTICS ? env.ANALYTICS.get("recent:conversations") : null,           // 2
+    null,           // 2 (conversations loaded async via /admin/api/conversations)
     env.ANALYTICS ? env.ANALYTICS.list({ prefix: "clinic:" }) : { keys: [] },  // 3
     env.ANALYTICS ? env.ANALYTICS.list({ prefix: "location:" }) : { keys: [] },// 4
     getClinics(env),                                                              // 5
@@ -971,7 +971,7 @@ async function buildAdminPage(pw, env) {
     .sort((a, b) => b.count - a.count);
 
   const days = dailyDates.map((d, i) => ({ date: d, count: parseInt(dailyCounts[i] || "0") }));
-  const recentList = recent ? JSON.parse(recent) : [];
+  const recentList = [];
   const maxCount = Math.max(...days.map(d => d.count), 1);
   const nightCount = timeBandCounts.find(t => t.band === "night")?.count || 0;
 
@@ -1103,7 +1103,6 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <div class="section"><h2>What people are looking for</h2><table>${intentRows}</table></div>
   </div>
   <div class="section"><h2>Time of day</h2>${timeBandBars}</div>
-  <div class="section"><h2>Recent conversations</h2><table>${recentRows}</table></div>
   <p style="margin-top:12px"><a href="/admin?pw=${esc(pw)}">Refresh</a></p>
 </div>
 
