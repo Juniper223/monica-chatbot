@@ -242,6 +242,13 @@ function openPendingReview(id) {
     var rawVal = sub[f];
     if (rawVal === undefined || rawVal === null || rawVal === '') return;
     var displayVal = Array.isArray(rawVal) ? rawVal.join(', ') : String(rawVal);
+    // Strip Python-style list brackets: ['A', 'B'] -> A, B
+    if (typeof displayVal === 'string' && displayVal.startsWith('[')) {
+      displayVal = displayVal.slice(1,-1).split(',').map(function(s){return s.trim().replace(/^['"]|['"]$/g,'');}).filter(Boolean).join(', ');
+    }
+    // Humanise True/False
+    if (displayVal === 'True') displayVal = 'Yes';
+    else if (displayVal === 'False') displayVal = 'No';
     var label = FIELD_LABELS[f] || f;
     fieldRows += '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
       (f === 'description' ? '<textarea id="pr-' + f + '" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(displayVal) + '</textarea>' : '<input id="pr-' + f + '" value="' + esc(displayVal) + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">') + '</div>';
