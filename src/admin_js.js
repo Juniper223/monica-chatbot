@@ -10,6 +10,8 @@ function showTab(name, btn) {
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   btn.classList.add('active');
+  if (name === 'convos') loadConvos();
+  if (name === 'settings') loadSettings();
 }
 
 function esc(s) {

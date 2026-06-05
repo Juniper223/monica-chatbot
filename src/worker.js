@@ -238,7 +238,7 @@ function adminPassword(env) {
 // ---- settings helpers ----
 
 const DEFAULT_SETTINGS = {
-  from_email: "portal@rehab-online.org.uk",
+  from_email: "onboarding@resend.dev",
   reply_to: "info@rehab-online.org.uk",
   notification_email: "",
   google_chat_webhook: "",
