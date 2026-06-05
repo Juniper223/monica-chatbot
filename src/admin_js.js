@@ -39,7 +39,8 @@ function renderClinics(list) {
       '<td style="font-size:11px;color:#64748b">' + (c.treats_under_18s && c.treats_under_18s !== 'no' ? '<span style="color:#7c3aed;font-weight:600">' + esc(c.treats_under_18s) + '</span>' : '18+') + '</td>' +
       '<td>' +
         '<button class="btn sm" onclick="openModal(' + c.id + ')">Edit</button> ' +
-        '<button class="btn sm secondary" onclick="genLink(' + c.id + ')">Link</button> ' +
+        (c.slug && c.portal_password ? '<button class="btn sm secondary" onclick="copyLogin(\'' + esc(c.slug) + '\',\'' + esc(c.portal_password) + '\',\'' + esc(c.title||'') + '\')" title="Copy portal login URL">Login</button> ' : '') +
+        '<button class="btn sm secondary" onclick="genLink(' + c.id + ')" title="One-time update link (30 days)">Link</button> ' +
         '<button class="btn sm danger" onclick="del(' + c.id + ')">Del</button>' +
       '</td>' +
       '</tr>';
@@ -55,7 +56,7 @@ function filterClinics() {
   }));
 }
 
-var FIELDS = ['id','title','website','phone','address','postcode','locations','cost','payment',
+var FIELDS = ['id','slug','portal_password','title','website','phone','address','postcode','locations','cost','payment',
   'gender_model','capacity','detox_on_site','dual_diagnosis','twelve_step','is_faith_based','faith_tradition',
   'has_family_programme','mother_child_service','setting','price_per_week_from','price_per_week_to',
   'rehab_type','named_modalities','addictions_treated','pricing_clean','ai_summary','description',
@@ -252,6 +253,14 @@ async function rejectPending(id) {
 }
 
 // ---- Link generation ----
+function copyLogin(slug, password, title) {
+  var base = window.location.origin;
+  var url = base + '/form/' + slug + '?pw=' + encodeURIComponent(password);
+  navigator.clipboard.writeText(url).then(function() {
+    showLink('Portal login for ' + (title || slug), url, null);
+  });
+}
+
 async function genLink(clinicId) {
   var r = await fetch('/admin/api/generate-link?pw=' + PW + '&id=' + clinicId + '&days=30');
   var d = await r.json();
@@ -266,9 +275,9 @@ async function generateNewLink() {
 
 function showLink(title, link, expiry) {
   document.getElementById('link-modal-title').textContent = title;
-  var exDate = new Date(expiry).toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'});
+  var exNote = expiry ? 'Expires ' + new Date(expiry).toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'}) + '.' : 'Permanent link (password-based).';
   document.getElementById('link-modal-body').innerHTML =
-    '<p style="font-size:13px;color:#64748b;margin-bottom:12px">Send this to the clinic. Expires ' + exDate + '.</p>' +
+    '<p style="font-size:13px;color:#64748b;margin-bottom:12px">Send this to the clinic. ' + exNote + '</p>' +
     '<textarea id="link-text" style="width:100%;height:72px;font-size:11.5px;font-family:monospace;padding:10px;border:1.5px solid #e2e8f0;border-radius:8px;resize:none;color:#334155" readonly>' + esc(link) + '</textarea>' +
     '<div style="display:flex;gap:8px;margin-top:10px">' +
     '<button class="btn" style="flex:1" onclick="navigator.clipboard.writeText(document.getElementById(\\'link-text\\').value).then(function(){ this.textContent=\\'Copied!\\'; }.bind(this))">Copy link</button>' +

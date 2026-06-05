@@ -369,6 +369,49 @@ radio('twelve_step','yes','Yes, 12-step based') + radio('twelve_step','informed'
 '</script>\n</body>\n</html>';
 }
 
+// Shared card CSS used by password/expired/success pages
+const CARD_CSS = '*{box-sizing:border-box;margin:0;padding:0}body{font-family:"Inter",system-ui,sans-serif;background:#faf9f7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;color:#1a1a2e}.card{background:#fff;border:1px solid #e4dfd8;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:48px 40px;max-width:440px;width:100%;text-align:center}.logo{height:34px;margin-bottom:28px}.icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 18px}h1{font-size:21px;font-weight:700;margin-bottom:10px}p{font-size:14px;color:#606880;line-height:1.7}';
+const LOGO_TAG = '<img class="logo" src="https://rehab-online.org.uk/wp-content/uploads/2026/04/rehab-online-logo.svg" alt="Rehab Online" onerror="this.style.display=\'none\'">';
+
+export function buildPasswordPage(slug, clinicTitle, error) {
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+  '<title>Clinic Portal | Rehab Online</title>' +
+  '<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">' +
+  '<style>' + CARD_CSS +
+  'label{display:block;font-size:11.5px;font-weight:600;color:#606880;text-transform:uppercase;letter-spacing:.06em;text-align:left;margin-bottom:6px;margin-top:18px}' +
+  'input[type=password]{width:100%;padding:11px 14px;border:1.5px solid #e4dfd8;border-radius:8px;font-size:15px;font-family:inherit;outline:none;text-align:center;letter-spacing:.1em}' +
+  'input:focus{border-color:#141a5b;box-shadow:0 0 0 3px rgba(20,26,91,.1)}' +
+  '.btn{display:block;width:100%;margin-top:14px;padding:13px;background:#141a5b;color:#fff;border:none;border-radius:99px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}' +
+  '.btn:hover{background:#0d1240}' +
+  '.error{background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b;margin-top:14px}' +
+  '.subtitle{font-size:13px;color:#9ca3b0;margin-top:6px}' +
+  '</style></head><body>' +
+  '<div class="card">' + LOGO_TAG +
+  '<h1>' + (clinicTitle || 'Clinic Portal') + '</h1>' +
+  '<p class="subtitle">Enter your portal password to access your listing</p>' +
+  (error ? '<div class="error">' + error + '</div>' : '') +
+  '<form method="GET" action="/form/' + slug + '">' +
+  '<label>Password</label>' +
+  '<input type="password" name="pw" autofocus required placeholder="your-password">' +
+  '<button type="submit" class="btn">Access my listing &rarr;</button>' +
+  '</form>' +
+  '<p style="margin-top:20px;font-size:12px;color:#9ca3b0">Forgotten your password? Contact <a href="mailto:info@rehab-online.org.uk" style="color:#141a5b">info@rehab-online.org.uk</a></p>' +
+  '</div></body></html>';
+}
+
+export function buildExpiredPage(message) {
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+  '<title>Link unavailable | Rehab Online</title>' +
+  '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">' +
+  '<style>' + CARD_CSS + '</style></head><body>' +
+  '<div class="card">' + LOGO_TAG +
+  '<div class="icon" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b">&#33;</div>' +
+  '<h1>Link unavailable</h1>' +
+  '<p>' + (message || 'This link has expired or is invalid.') + '</p>' +
+  '<p style="margin-top:16px;font-size:13px">Contact <a href="mailto:info@rehab-online.org.uk" style="color:#141a5b">info@rehab-online.org.uk</a> for a new one.</p>' +
+  '</div></body></html>';
+}
+
 export function buildFormSuccessPage(isUpdate) {
   return '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n' +
 '<title>Submission received | Rehab Online</title>\n' +

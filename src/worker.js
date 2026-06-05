@@ -1,5 +1,5 @@
 import { DEMO_HTML } from "./demo_html.js";
-import { buildFormPage, buildFormSuccessPage } from "./form_html.js";
+import { buildFormPage, buildFormSuccessPage, buildPasswordPage, buildExpiredPage } from "./form_html.js";
 import { ADMIN_JS } from "./admin_js.js";
 
 // ADMIN_PASSWORD is now a Worker secret (env.ADMIN_PASSWORD)
@@ -200,7 +200,7 @@ export default {
     if (url.pathname === "/chat" && request.method === "POST") {
       return handleChat(request, env, ctx);
     }
-    if (url.pathname === "/form") {
+    if (url.pathname === "/form" || url.pathname.startsWith("/form/")) {
       return handleForm(request, env, url);
     }
     if (url.pathname.startsWith("/admin")) {
@@ -240,6 +240,33 @@ function adminPassword(env) {
 async function handleForm(request, env, url) {
   const htmlHeaders = { "Content-Type": "text/html; charset=utf-8" };
 
+  // Slug-based route: /form/castle-craig or /form/castle-craig?pw=password
+  const slugMatch = url.pathname.match(/^\/form\/([a-z0-9-]+)$/);
+  if (slugMatch) {
+    const slug = slugMatch[1];
+    const pw   = url.searchParams.get("pw") || "";
+    const clinics = await getClinics(env);
+    const clinic = clinics.find(c => c.slug === slug) || null;
+
+    if (!clinic) {
+      return new Response(buildExpiredPage("Clinic not found. Please check your link or contact Rehab Online."),
+        { status: 404, headers: htmlHeaders });
+    }
+
+    if (!pw) {
+      // Show password prompt
+      return new Response(buildPasswordPage(slug, clinic.title || slug, null), { status: 200, headers: htmlHeaders });
+    }
+
+    if (pw !== clinic.portal_password) {
+      return new Response(buildPasswordPage(slug, clinic.title || slug, "Incorrect password. Please try again or contact Rehab Online."),
+        { status: 401, headers: htmlHeaders });
+    }
+
+    // Password correct — show pre-filled form using slug+pw as auth (no token needed)
+    return new Response(buildFormPage({ clinic, token: pw, expiry: "slug", slugMode: true }), { status: 200, headers: htmlHeaders });
+  }
+
   if (request.method === "GET") {
     const token  = url.searchParams.get("token") || "";
     const expiry = url.searchParams.get("exp")   || "";
@@ -249,7 +276,7 @@ async function handleForm(request, env, url) {
     const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
     const valid = token && expiry && await verifyToken(adminPassword(env), message, token);
     if (!valid || Date.now() > parseInt(expiry)) {
-      return new Response("<h2>This link has expired or is invalid. Please contact Rehab Online for a new link.</h2>",
+      return new Response(buildExpiredPage("This link has expired or is invalid. Please contact Rehab Online for a new one."),
         { status: 403, headers: htmlHeaders });
     }
 
@@ -268,10 +295,19 @@ async function handleForm(request, env, url) {
     const id     = body.get("clinic_id") || "";
     const type   = body.get("type") || "new";
 
-    const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
-    const valid = token && expiry && await verifyToken(adminPassword(env), message, token);
-    if (!valid || Date.now() > parseInt(expiry)) {
-      return new Response(buildFormPage({ token, expiry, error: "This link has expired. Please request a new one." }),
+    // Slug-mode: token = portal_password, expiry = "slug"
+    const slugMode = expiry === "slug";
+    let valid = false;
+    if (slugMode && id) {
+      const clinics = await getClinics(env);
+      const clinic = clinics.find(c => String(c.id) === id);
+      valid = clinic && token === clinic.portal_password;
+    } else {
+      const message = id ? `update:${id}:${expiry}` : `new:${expiry}`;
+      valid = token && expiry && await verifyToken(adminPassword(env), message, token) && Date.now() <= parseInt(expiry);
+    }
+    if (!valid) {
+      return new Response(buildExpiredPage("This link has expired or is invalid. Please contact Rehab Online."),
         { status: 403, headers: htmlHeaders });
     }
 
@@ -833,6 +869,8 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <input type="hidden" id="f-id" />
     <div class="form-grid">
       <div class="full"><label>Clinic name *</label><input id="f-title" required /></div>
+      <div><label>URL slug (portal ID)</label><input id="f-slug" placeholder="e.g. castle-craig" /></div>
+      <div><label>Portal password</label><input id="f-portal_password" placeholder="Auto-generated" /></div>
       <div><label>Website</label><input id="f-website" /></div>
       <div><label>Phone</label><input id="f-phone" /></div>
       <div class="full"><label>Address</label><input id="f-address" /></div>
