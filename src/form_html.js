@@ -17,8 +17,9 @@ const SECTIONS = [
   { id: 's10', label: 'About your clinic'        },
 ];
 
-export function buildFormPage({ clinic = null, token, expiry, error = null }) {
+export function buildFormPage({ clinic = null, token, expiry, error = null, pendingId = null, pendingMeta = null }) {
   const isUpdate = !!clinic;
+  const isResubmission = !!pendingId;
 
   function val(f, fallback) { fallback = fallback === undefined ? '' : fallback; return clinic ? (clinic[f] || fallback) : fallback; }
   function checked(f, v) {
@@ -187,7 +188,7 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '  <img src="' + LOGO_URL + '" alt="Rehab Online" onerror="this.style.display=\'none\'">\n' +
 '  <div class="header-divider"></div>\n' +
 '  <div>\n' +
-'    <div class="header-title">' + (isUpdate ? 'Update your listing' : 'Clinic application portal') + '</div>\n' +
+'    <div class="header-title">' + (isResubmission ? 'Resubmit your listing' : isUpdate ? 'Update your listing' : 'Clinic application portal') + '</div>\n' +
 '    <div style="font-size:11.5px;color:rgba(255,255,255,.45);margin-top:1px">Takes about 10 minutes &middot; Reviewed before publishing</div>\n' +
 '  </div>\n' +
 '</header>\n' +
@@ -220,6 +221,10 @@ export function buildFormPage({ clinic = null, token, expiry, error = null }) {
 '<input type="hidden" name="expiry" value="' + expiry + '">\n' +
 (clinic ? '<input type="hidden" name="clinic_id" value="' + clinic.id + '">\n' : '') +
 '<input type="hidden" name="type" value="' + (isUpdate ? 'update' : 'new') + '">\n' +
+(pendingId ? '<input type="hidden" name="pending_id" value="' + pendingId + '">\n' : '') +
+(isResubmission && pendingMeta && pendingMeta.feedback_message
+  ? '<div style="background:#fef3c7;border:1px solid #f59e0b;border-left:4px solid #f59e0b;border-radius:0 10px 10px 0;padding:14px 18px;margin-bottom:20px"><p style="font-size:13px;font-weight:600;color:#92400e;margin-bottom:4px">Feedback from Rehab Online:</p><p style="font-size:14px;color:#78350f;line-height:1.6">' + pendingMeta.feedback_message.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p></div>\n'
+  : '') +
 '<input type="hidden" name="photo_data" id="photo-data" value="">\n' +
 '<input type="hidden" name="logo_data" id="logo-data" value="">\n' +
 

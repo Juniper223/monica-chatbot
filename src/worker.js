@@ -235,18 +235,115 @@ function adminPassword(env) {
   return env.ADMIN_PASSWORD || "RehabOnline@123"; // fallback for local dev only
 }
 
+// ---- settings helpers ----
+
+const DEFAULT_SETTINGS = {
+  from_email: "portal@rehab-online.org.uk",
+  reply_to: "info@rehab-online.org.uk",
+  notification_email: "",
+  google_chat_webhook: "",
+  team_members: "Jennifer",
+  templates: {
+    submission_received: {
+      subject: "We have received your submission",
+      body: "Hi {{clinic_name}},\n\nThank you for submitting your details to Rehab Online. We will review your submission and aim to be in touch within 2 working days.\n\nIf you have any questions please reply to this email.\n\nThe Rehab Online team",
+    },
+    changes_requested: {
+      subject: "Your Rehab Online listing - a few things to check",
+      body: "Hi {{clinic_name}},\n\nThank you for your submission. Before we can publish your listing we have a few things we would like you to review:\n\n{{feedback_message}}\n\nYou can update your submission here:\n{{form_link}}\n\nIf you have any questions please reply to this email.\n\nThe Rehab Online team",
+    },
+    approved: {
+      subject: "Your Rehab Online listing is now live",
+      body: "Hi {{clinic_name}},\n\nGreat news - your listing is now live on Rehab Online.\n\nYou can view it at: {{listing_url}}\n\nTo update your listing in future, log in to your portal at:\n{{portal_link}}\n\nThe Rehab Online team",
+    },
+    approved_with_edits: {
+      subject: "Your Rehab Online listing is now live",
+      body: "Hi {{clinic_name}},\n\nGreat news - your listing is now live on Rehab Online. We made a few minor edits before publishing:\n\n{{edit_summary}}\n\nYou can view it at: {{listing_url}}\n\nTo update your listing in future, log in to your portal at:\n{{portal_link}}\n\nThe Rehab Online team",
+    },
+    rejected: {
+      subject: "Your Rehab Online listing application",
+      body: "Hi {{clinic_name}},\n\nThank you for your interest in being listed on Rehab Online.\n\nUnfortunately we are not able to publish your listing at this time.\n\n{{reject_reason}}\n\nIf you have any questions please reply to this email.\n\nThe Rehab Online team",
+    },
+    portal_login: {
+      subject: "Your Rehab Online clinic portal",
+      body: "Hi {{clinic_name}},\n\nYou have been set up with a portal on Rehab Online where you can update your listing details at any time.\n\nYour portal link: {{portal_link}}\nYour password: {{portal_password}}\n\nKeep this somewhere safe. If you ever need a new link just contact us.\n\nThe Rehab Online team",
+    },
+  },
+};
+
+async function getSettings(env) {
+  if (!env.ANALYTICS) return DEFAULT_SETTINGS;
+  const raw = await env.ANALYTICS.get("settings:config");
+  if (!raw) return DEFAULT_SETTINGS;
+  const saved = JSON.parse(raw);
+  // Deep merge with defaults so new template keys always exist
+  return { ...DEFAULT_SETTINGS, ...saved, templates: { ...DEFAULT_SETTINGS.templates, ...(saved.templates || {}) } };
+}
+
+async function saveSettings(env, settings) {
+  if (env.ANALYTICS) await env.ANALYTICS.put("settings:config", JSON.stringify(settings));
+}
+
+// ---- email stub (wired up when RESEND_API_KEY secret is added) ----
+
+async function sendEmail(env, templateKey, toEmail, vars) {
+  if (!toEmail || !toEmail.includes("@")) return { ok: false, reason: "no_email" };
+  const settings = await getSettings(env);
+  const template = settings.templates[templateKey];
+  if (!template) return { ok: false, reason: "no_template" };
+
+  let subject = template.subject;
+  let body = template.body;
+  for (const [k, v] of Object.entries(vars || {})) {
+    subject = subject.split("{{" + k + "}}").join(v || "");
+    body = body.split("{{" + k + "}}").join(v || "");
+  }
+
+  if (!env.RESEND_API_KEY) {
+    console.log(`[EMAIL STUB] To: ${toEmail} | Subject: ${subject}`);
+    return { ok: false, reason: "no_resend_key", subject, body };
+  }
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: settings.from_email || "portal@rehab-online.org.uk",
+      reply_to: settings.reply_to || "info@rehab-online.org.uk",
+      to: [toEmail],
+      subject,
+      text: body,
+    }),
+  });
+  return { ok: res.ok, status: res.status };
+}
+
+// ---- Google Chat notification ----
+
+async function notifyGoogleChat(env, text) {
+  const settings = await getSettings(env);
+  const webhook = settings.google_chat_webhook;
+  if (!webhook) return;
+  await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  }).catch(() => {});
+}
+
 // ---- form handler ----
 
 async function handleForm(request, env, url) {
   const htmlHeaders = { "Content-Type": "text/html; charset=utf-8" };
 
-  // Slug-based route: /form/castle-craig or /form/castle-craig?pw=password
+  // Slug-based route: /form/castle-craig or /form/castle-craig?pw=password&pending=ID
   const slugMatch = url.pathname.match(/^\/form\/([a-z0-9-]+)$/);
   if (slugMatch) {
-    const slug = slugMatch[1];
-    const pw   = url.searchParams.get("pw") || "";
-    const clinics = await getClinics(env);
-    const clinic = clinics.find(c => c.slug === slug) || null;
+    const slug      = slugMatch[1];
+    const pw        = url.searchParams.get("pw") || "";
+    const pendingId = url.searchParams.get("pending") || "";
+    const clinics   = await getClinics(env);
+    const clinic    = clinics.find(c => c.slug === slug) || null;
 
     if (!clinic) {
       return new Response(buildExpiredPage("Clinic not found. Please check your link or contact Rehab Online."),
@@ -254,7 +351,6 @@ async function handleForm(request, env, url) {
     }
 
     if (!pw) {
-      // Show password prompt
       return new Response(buildPasswordPage(slug, clinic.title || slug, null), { status: 200, headers: htmlHeaders });
     }
 
@@ -263,8 +359,23 @@ async function handleForm(request, env, url) {
         { status: 401, headers: htmlHeaders });
     }
 
-    // Password correct — show pre-filled form using slug+pw as auth (no token needed)
-    return new Response(buildFormPage({ clinic, token: pw, expiry: "slug", slugMode: true }), { status: 200, headers: htmlHeaders });
+    // If a pending ID is provided, load that submission data instead of live clinic data
+    let formClinic = clinic;
+    let pendingMeta = null;
+    if (pendingId && env.PENDING) {
+      const raw = await env.PENDING.get(`pending:${pendingId}`);
+      if (raw) {
+        const item = JSON.parse(raw);
+        const submission = item.submission || item; // handle both new and old schema
+        pendingMeta = item.meta || {};
+        formClinic = { ...clinic, ...submission }; // merge live clinic with pending submission
+      }
+    }
+
+    return new Response(buildFormPage({
+      clinic: formClinic, token: pw, expiry: "slug", slugMode: true,
+      pendingId, pendingMeta,
+    }), { status: 200, headers: htmlHeaders });
   }
 
   if (request.method === "GET") {
@@ -312,14 +423,14 @@ async function handleForm(request, env, url) {
     }
 
     // Collect submitted fields (exclude trust fields)
-    const TRUST_FIELDS = new Set(["min_age","treats_under_18s","regulatory_body","regulatory_rating", // treats_under_18s_claimed IS allowed (self-declared, goes to pending for verification)
+    const TRUST_FIELDS = new Set(["min_age","treats_under_18s","regulatory_body","regulatory_rating",
       "last_inspection_date","ai_summary"]);
-    const submission = { type, submitted_at: new Date().toISOString() };
+    const SKIP_FIELDS = new Set(["token","expiry","clinic_id","type","pending_id"]);
+    const submission = {};
     if (id) submission.clinic_id = parseInt(id);
 
     for (const [key, value] of body.entries()) {
-      if (TRUST_FIELDS.has(key) || ["token","expiry","clinic_id","type"].includes(key)) continue;
-      // Collect multi-value checkboxes as arrays
+      if (TRUST_FIELDS.has(key) || SKIP_FIELDS.has(key)) continue;
       if (submission[key] !== undefined) {
         if (!Array.isArray(submission[key])) submission[key] = [submission[key]];
         submission[key].push(value);
@@ -328,13 +439,57 @@ async function handleForm(request, env, url) {
       }
     }
 
-    // Store in PENDING KV
+    // Determine if this is a resubmission (came via ?pending=ID feedback link)
+    const originalPendingId = body.get("pending_id") || "";
+    const isResubmission = !!originalPendingId;
+    const submissionType = isResubmission ? "resubmission" : type;
+
+    const now = new Date().toISOString();
+    const newPendingId = crypto.randomUUID();
+
+    const pendingEntry = {
+      meta: {
+        type: submissionType,
+        status: "new",
+        submitted_at: now,
+        clinic_id: submission.clinic_id || null,
+        title: submission.title || "Untitled",
+        email: submission.email || "",
+        assigned_to: null,
+        assigned_at: null,
+        internal_notes: "",
+        original_pending_id: originalPendingId || null,
+        feedback_message: null,
+        feedback_sent_at: null,
+      },
+      submission,
+    };
+
     if (env.PENDING) {
-      const pendingId = crypto.randomUUID();
-      await env.PENDING.put(`pending:${pendingId}`, JSON.stringify(submission));
+      await env.PENDING.put(`pending:${newPendingId}`, JSON.stringify(pendingEntry));
+      // If resubmission, archive the original
+      if (originalPendingId) {
+        const orig = await env.PENDING.get(`pending:${originalPendingId}`);
+        if (orig) {
+          const origData = JSON.parse(orig);
+          if (origData.meta) origData.meta.status = "superseded";
+          await env.PENDING.put(`pending:${originalPendingId}`, JSON.stringify(origData));
+        }
+      }
     }
 
-    const isUpdate = type === "update";
+    // Fire Google Chat notification
+    const typeLabel = submissionType === "resubmission" ? "Resubmission" : submissionType === "update" ? "Update" : "New application";
+    ctx.waitUntil(notifyGoogleChat(env,
+      `🔔 *${typeLabel}* received\n*Clinic:* ${submission.title || "Unknown"}\n*Submitted:* ${now.slice(0,16).replace("T"," ")}`
+    ));
+
+    // Send acknowledgement email to clinic
+    ctx.waitUntil(sendEmail(env, "submission_received", submission.email, {
+      clinic_name: submission.title || "there",
+    }));
+
+    const isUpdate = type === "update" || isResubmission;
     return new Response(buildFormSuccessPage(isUpdate), { status: 200, headers: htmlHeaders });
   }
 
@@ -583,44 +738,144 @@ async function handleAdmin(request, env, url) {
   // Pending queue API
   if (url.pathname === "/admin/api/pending") {
     const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+
     if (request.method === "GET") {
       const list = env.PENDING ? (await env.PENDING.list({ prefix: "pending:" })).keys : [];
       const items = await Promise.all(list.map(async k => {
-        const val = await env.PENDING.get(k.name);
-        return val ? { id: k.name.replace("pending:", ""), ...JSON.parse(val) } : null;
+        const raw = await env.PENDING.get(k.name);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        // Normalise old-format entries (no meta wrapper)
+        if (!data.meta) return { id: k.name.replace("pending:", ""), meta: { type: data.type||"update", status: "new", submitted_at: data.submitted_at||"", title: data.title||"", email: data.email||"", assigned_to: null, assigned_at: null, internal_notes: "", original_pending_id: null }, submission: data };
+        return { id: k.name.replace("pending:", ""), ...data };
       }));
-      return new Response(JSON.stringify(items.filter(Boolean)), { status: 200, headers });
+      // Sort: newest first, superseded last
+      const sorted = items.filter(Boolean).sort((a, b) => {
+        if (a.meta.status === "superseded" && b.meta.status !== "superseded") return 1;
+        if (b.meta.status === "superseded" && a.meta.status !== "superseded") return -1;
+        return (b.meta.submitted_at || "").localeCompare(a.meta.submitted_at || "");
+      });
+      return new Response(JSON.stringify(sorted), { status: 200, headers });
     }
-    // Approve: merge submission into clinic record
+
     if (request.method === "POST") {
-      const { action, id, clinic_data } = await request.json();
-      if (action === "approve" && id) {
+      const body = await request.json();
+      const { action, id } = body;
+      if (!id || !env.PENDING) return new Response(JSON.stringify({ ok: false }), { status: 400, headers });
+
+      const raw = await env.PENDING.get(`pending:${id}`);
+      if (!raw) return new Response(JSON.stringify({ ok: false, reason: "not_found" }), { status: 404, headers });
+      const item = JSON.parse(raw);
+      const meta = item.meta || {};
+      const submission = item.submission || item;
+
+      // Assign
+      if (action === "assign") {
+        meta.assigned_to = body.assigned_to || null;
+        meta.assigned_at = body.assigned_to ? new Date().toISOString() : null;
+        meta.status = body.assigned_to ? "in_review" : "new";
+        await env.PENDING.put(`pending:${id}`, JSON.stringify({ ...item, meta }));
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+      }
+
+      // Approve (with optional edited data + edit summary)
+      if (action === "approve") {
         const clinics = await getClinics(env);
-        const cid = clinic_data.clinic_id;
+        const editedData = body.clinic_data || submission;
+        const trustFields = body.trust_fields || {};
+        const editSummary = body.edit_summary || "";
+        const cid = editedData.clinic_id || meta.clinic_id;
+
         if (cid) {
           const idx = clinics.findIndex(c => c.id === cid);
           if (idx >= 0) {
-            // Merge: submitted fields overwrite, trust fields preserved from existing
-            const trust = { min_age: clinics[idx].min_age, treats_under_18s: clinics[idx].treats_under_18s,
-              regulatory_body: clinics[idx].regulatory_body, regulatory_rating: clinics[idx].regulatory_rating,
-              last_inspection_date: clinics[idx].last_inspection_date, ai_summary: clinics[idx].ai_summary };
-            clinics[idx] = { ...clinics[idx], ...clinic_data, ...trust, id: cid };
+            clinics[idx] = { ...clinics[idx], ...editedData, ...trustFields, id: cid };
           }
         } else {
-          // New clinic
-          const newClinic = { ...clinic_data, id: (clinics.reduce((mx, c) => Math.max(mx, c.id||0),0))+1 };
-          clinics.push(newClinic);
+          const newId = (clinics.reduce((mx, c) => Math.max(mx, c.id||0), 0)) + 1;
+          const slug = (editedData.title || "clinic").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
+          const portal_password = `${["amber","cliff","dawn","echo","flame","grove","haven","inlet"][Math.floor(Math.random()*8)]}-${["oak","pine","reef","sage","tide","vale","wave","zen"][Math.floor(Math.random()*8)]}-${Math.floor(Math.random()*90)+10}`;
+          clinics.push({ ...editedData, ...trustFields, id: newId, slug, portal_password });
         }
         await saveClinics(env, clinics);
-        if (env.PENDING) await env.PENDING.delete(`pending:${id}`);
+        await env.PENDING.delete(`pending:${id}`);
+
+        // Send email
+        const clinicEmail = meta.email || editedData.email || "";
+        const clinicName = editedData.title || meta.title || "there";
+        const templateKey = editSummary ? "approved_with_edits" : "approved";
+        ctx.waitUntil(sendEmail(env, templateKey, clinicEmail, {
+          clinic_name: clinicName,
+          edit_summary: editSummary,
+          listing_url: `https://rehab-online.org.uk/clinics/${editedData.slug || ""}`,
+          portal_link: `${url.origin}/form/${editedData.slug || ""}`,
+        }));
+
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
       }
-      if (action === "reject" && id) {
-        if (env.PENDING) await env.PENDING.delete(`pending:${id}`);
+
+      // Request changes — send feedback, keep in pending, provide resubmission link
+      if (action === "request_changes") {
+        const feedbackMessage = body.feedback_message || "";
+        meta.status = "awaiting_resubmission";
+        meta.feedback_message = feedbackMessage;
+        meta.feedback_sent_at = new Date().toISOString();
+        await env.PENDING.put(`pending:${id}`, JSON.stringify({ ...item, meta }));
+
+        // Build resubmission link that loads this pending entry
+        const clinicSlug = submission.slug || (meta.clinic_id ? (await getClinics(env)).find(c => c.id === meta.clinic_id)?.slug : null);
+        const clinicPassword = meta.clinic_id ? (await getClinics(env)).find(c => c.id === meta.clinic_id)?.portal_password : null;
+        const formLink = clinicSlug && clinicPassword
+          ? `${url.origin}/form/${clinicSlug}?pending=${id}&pw=${encodeURIComponent(clinicPassword)}`
+          : `${url.origin}/form/${clinicSlug || ""}`;
+
+        const clinicEmail = meta.email || submission.email || "";
+        ctx.waitUntil(sendEmail(env, "changes_requested", clinicEmail, {
+          clinic_name: meta.title || submission.title || "there",
+          feedback_message: feedbackMessage,
+          form_link: formLink,
+        }));
+
+        return new Response(JSON.stringify({ ok: true, form_link: formLink }), { status: 200, headers });
+      }
+
+      // Reject with reason
+      if (action === "reject") {
+        const rejectReason = body.reject_reason || "";
+        meta.status = "rejected";
+        meta.reject_reason = rejectReason;
+        meta.rejected_at = new Date().toISOString();
+        // Archive (keep for 30 days) rather than delete
+        await env.PENDING.put(`pending:${id}`, JSON.stringify({ ...item, meta }), { expirationTtl: 30 * 86400 });
+
+        const clinicEmail = meta.email || submission.email || "";
+        ctx.waitUntil(sendEmail(env, "rejected", clinicEmail, {
+          clinic_name: meta.title || submission.title || "there",
+          reject_reason: rejectReason,
+        }));
+
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
       }
+
+      return new Response(JSON.stringify({ ok: false, reason: "unknown_action" }), { status: 400, headers });
     }
+
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // Settings API
+  if (url.pathname === "/admin/api/settings") {
+    const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+    if (request.method === "GET") {
+      return new Response(JSON.stringify(await getSettings(env)), { status: 200, headers });
+    }
+    if (request.method === "POST") {
+      const updates = await request.json();
+      const current = await getSettings(env);
+      const merged = { ...current, ...updates, templates: { ...current.templates, ...(updates.templates || {}) } };
+      await saveSettings(env, merged);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+    }
   }
 
   // Generate form link
@@ -808,6 +1063,7 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <button onclick="showTab('clinics',this)">Clinics</button>
     <button onclick="showTab('pending',this)" id="pending-tab-btn">Pending</button>
     <button onclick="showTab('convos',this)" id="convos-tab-btn">Conversations</button>
+    <button onclick="showTab('settings',this)">Settings</button>
   </nav>
 </header>
 <main>
@@ -863,6 +1119,32 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
     <button class="btn secondary" onclick="exportConvos()">Export markdown</button>
   </div>
   <div id="convos-list"><p style="color:#94a3b8;font-size:14px">Loading...</p></div>
+</div>
+
+<div id="tab-settings" class="tab">
+  <div style="max-width:700px">
+    <div class="section" style="margin-bottom:20px">
+      <h2>Notifications</h2>
+      <div class="field"><label>New submission alert email</label><input id="s-notification_email" placeholder="jennifer@jcrc.co.uk"><div class="hint">Receives an email whenever a new listing is submitted</div></div>
+      <div class="field"><label>Google Chat webhook URL</label><input id="s-google_chat_webhook" placeholder="https://chat.googleapis.com/v1/spaces/..."><div class="hint">Paste the webhook URL from your Google Chat space. Messages fire on every new submission.</div></div>
+    </div>
+    <div class="section" style="margin-bottom:20px">
+      <h2>Email identity</h2>
+      <div class="field"><label>Send from</label><input id="s-from_email" placeholder="portal@rehab-online.org.uk"></div>
+      <div class="field"><label>Reply-to address</label><input id="s-reply_to" placeholder="info@rehab-online.org.uk"></div>
+    </div>
+    <div class="section" style="margin-bottom:20px">
+      <h2>Team</h2>
+      <div class="field"><label>Team members (comma separated, used in assignment dropdown)</label><input id="s-team_members" placeholder="Jennifer, Rebecca, Nicole"></div>
+    </div>
+    <div class="section" style="margin-bottom:20px">
+      <h2>Email templates</h2>
+      <p style="font-size:13px;color:#64748b;margin-bottom:16px">Available variables: {{clinic_name}} {{form_link}} {{portal_link}} {{listing_url}} {{feedback_message}} {{edit_summary}} {{reject_reason}} {{portal_password}}</p>
+      <div id="template-list"></div>
+    </div>
+    <button class="btn" onclick="saveSettings()">Save settings</button>
+    <span id="settings-saved" style="display:none;margin-left:12px;font-size:13px;color:#16a34a">Saved</span>
+  </div>
 </div>
 
 </main>

@@ -184,73 +184,147 @@ async function importCSV(event) {
 }
 
 // ---- Pending queue ----
+var _pendingItems = [];
+var TYPE_BADGES = {
+  new: '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">New application</span>',
+  update: '<span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Update</span>',
+  resubmission: '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Resubmission</span>',
+};
+var STATUS_BADGES = {
+  new: '<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:99px;font-size:11px">New</span>',
+  in_review: '<span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:99px;font-size:11px">In review</span>',
+  awaiting_resubmission: '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-size:11px">Awaiting resubmission</span>',
+  superseded: '<span style="background:#f1f5f9;color:#94a3b8;padding:2px 8px;border-radius:99px;font-size:11px">Superseded</span>',
+  rejected: '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:99px;font-size:11px">Rejected</span>',
+};
+
 async function loadPending() {
   var r = await fetch('/admin/api/pending?pw=' + PW);
-  var items = await r.json();
+  _pendingItems = await r.json();
+  var active = _pendingItems.filter(function(i) { return i.meta && i.meta.status !== 'superseded' && i.meta.status !== 'rejected'; });
   var btn = document.getElementById('pending-tab-btn');
-  if (btn) btn.textContent = items.length ? 'Pending (' + items.length + ')' : 'Pending';
+  if (btn) btn.textContent = active.length ? 'Pending (' + active.length + ')' : 'Pending';
   var el = document.getElementById('pending-list');
   if (!el) return;
-  if (!items.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:14px;padding:20px 0">No pending submissions.</p>'; return; }
-  el.innerHTML = items.map(function(item) {
-    var title = item.title || '(untitled)';
-    var isNew = item.type !== 'update';
-    var typeBadge = isNew
-      ? '<span style="margin-left:10px;background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">New clinic</span>'
-      : '<span style="margin-left:10px;background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Update</span>';
-    var date = item.submitted_at ? item.submitted_at.slice(0,10) : '';
-    return '<div style="background:#fff;border-radius:10px;padding:16px 20px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);display:flex;align-items:center;gap:16px">' +
-      '<div style="flex:1"><strong style="font-size:14px">' + esc(title) + '</strong>' + typeBadge +
-      (date ? '<span style="margin-left:8px;font-size:12px;color:#94a3b8">' + date + '</span>' : '') + '</div>' +
-      '<button class="btn sm" onclick="reviewPending(\\'' + item.id + '\\')">Review</button> ' +
-      '<button class="btn sm danger" onclick="rejectPending(\\'' + item.id + '\\')">Reject</button></div>';
+  if (!_pendingItems.length) { el.innerHTML = '<p style="color:#94a3b8;font-size:14px;padding:20px 0">No pending submissions.</p>'; return; }
+  el.innerHTML = _pendingItems.map(function(item) {
+    var meta = item.meta || {};
+    var isSuperseded = meta.status === 'superseded' || meta.status === 'rejected';
+    var title = meta.title || (item.submission||{}).title || item.title || '(untitled)';
+    var typeBadge = TYPE_BADGES[meta.type || item.type || 'update'] || '';
+    var statusBadge = STATUS_BADGES[meta.status || 'new'] || '';
+    var date = meta.submitted_at ? meta.submitted_at.slice(0,10) : '';
+    var assignBadge = meta.assigned_to
+      ? '<span style="margin-left:8px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:2px 8px;border-radius:99px;font-size:11px">&#9679; ' + esc(meta.assigned_to) + '</span>'
+      : '<span style="margin-left:8px;background:#fef2f2;color:#991b1b;border:1px solid #fca5a5;padding:2px 8px;border-radius:99px;font-size:11px">Unassigned</span>';
+    return '<div style="background:' + (isSuperseded?'#fafafa':'#fff') + ';border-radius:10px;padding:16px 20px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);' + (isSuperseded?'opacity:.5':'') + '">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<strong style="font-size:14px">' + esc(title) + '</strong>' + typeBadge + statusBadge + assignBadge +
+        (date ? '<span style="font-size:12px;color:#94a3b8;margin-left:4px">' + date + '</span>' : '') +
+        '<div style="margin-left:auto">' +
+          (!isSuperseded ? '<button class="btn sm" onclick="openPendingReview(' + JSON.stringify(item.id) + ')">Review</button>' : '') +
+        '</div>' +
+      '</div></div>';
   }).join('');
 }
 
-async function reviewPending(id) {
-  var items = await fetch('/admin/api/pending?pw=' + PW).then(function(r) { return r.json(); });
-  var item = items.find(function(i) { return i.id === id; });
+
+function closePendingModal() { var el = document.getElementById('pending-overlay'); if (el) el.classList.remove('open'); }
+function openPendingReview(id) {
+  var item = _pendingItems.find(function(i) { return i.id === id; });
   if (!item) return;
-  document.getElementById('pending-modal-title').textContent = (item.type === 'update' ? 'Update: ' : 'New clinic: ') + (item.title || '');
-  var rows = Object.entries(item)
-    .filter(function(e) { return !['id','type','submitted_at','clinic_id'].includes(e[0]); })
-    .map(function(e) {
-      var val = Array.isArray(e[1]) ? e[1].join(', ') : String(e[1]||'');
-      return '<tr><td style="font-size:12px;color:#64748b;padding:4px 8px;width:180px">' + esc(e[0]) + '</td><td style="font-size:13px;padding:4px 8px">' + esc(val) + '</td></tr>';
-    }).join('');
-  document.getElementById('pending-modal-body').innerHTML = '<table style="width:100%;border-collapse:collapse"><tbody>' + rows + '</tbody></table>';
-  document.getElementById('pending-modal-footer').innerHTML =
-    '<button class="btn secondary" onclick="document.getElementById(\\'pending-overlay\\').classList.remove(\\'open\\')">Cancel</button> ' +
-    '<button class="btn danger" onclick="rejectPending(\\'' + id + '\\');document.getElementById(\\'pending-overlay\\').classList.remove(\\'open\\')">Reject</button> ' +
-    '<button class="btn" onclick="approvePending(\\'' + id + '\\')">Approve &amp; publish</button>';
+  var meta = item.meta || {};
+  var sub = item.submission || item;
+  var FIELD_LABELS = {title:'Clinic name',website:'Website',phone:'Phone',email:'Email',address:'Address',postcode:'Postcode',gender_model:'Gender',capacity:'Beds',detox_on_site:'Detox on site',dual_diagnosis:'Dual diagnosis',twelve_step:'12-step',is_faith_based:'Faith-based',faith_tradition:'Faith tradition',named_modalities:'Therapies',description:'Description',setting:'Setting',waiting_time:'Waiting time',languages:'Languages',price_per_week_from:'Price from',price_per_week_to:'Price to',insurance_networks:'Insurance',google_reviews_url:'Google reviews',trustpilot_url:'Trustpilot',facebook_url:'Facebook',instagram_url:'Instagram',linkedin_url:'LinkedIn',nhs_ff_score:'NHS F&F score',accreditations_other:'Other accreditations'};
+  var ARRAY_FIELDS = ['treatment_types','addictions_treated','mental_health_conditions','funding_types','accreditations'];
+  var fieldRows = '';
+  Object.keys(FIELD_LABELS).concat(ARRAY_FIELDS).forEach(function(f) {
+    var rawVal = sub[f];
+    if (rawVal === undefined || rawVal === null || rawVal === '') return;
+    var displayVal = Array.isArray(rawVal) ? rawVal.join(', ') : String(rawVal);
+    var label = FIELD_LABELS[f] || f;
+    fieldRows += '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
+      (f === 'description' ? '<textarea id="pr-' + f + '" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(displayVal) + '</textarea>' : '<input id="pr-' + f + '" value="' + esc(displayVal) + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">') + '</div>';
+  });
+  var teamMembers = (_settingsCache && _settingsCache.team_members ? _settingsCache.team_members : 'Jennifer').split(',').map(function(s){return s.trim();});
+  var memberOptions = '<option value="">Unassigned</option>' + teamMembers.map(function(m){return '<option value="'+esc(m)+'"'+(meta.assigned_to===m?' selected':'')+'>'+esc(m)+'</option>';}).join('');
+  var html = '<div style="padding-bottom:14px;border-bottom:1px solid #f1f5f9;margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">' + (TYPE_BADGES[meta.type||'update']||'') + (STATUS_BADGES[meta.status||'new']||'') + '<span style="font-size:12px;color:#94a3b8">'+(meta.submitted_at||'').slice(0,16).replace('T',' ')+'</span></div>' +
+    (meta.feedback_message ? '<div style="margin-bottom:14px;background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e"><strong>Previous feedback sent:</strong> '+esc(meta.feedback_message)+'</div>' : '') +
+    '<div style="display:grid;grid-template-columns:1fr 260px;gap:20px"><div><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Submitted data <span style="font-weight:400;color:#94a3b8;text-transform:none">(edit before approving)</span></p>' + fieldRows + '</div>' +
+    '<div><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Assignment</p><select id="pr-assign" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;margin-bottom:6px">' + memberOptions + '</select>' + (meta.assigned_at ? '<p style="font-size:12px;color:#94a3b8;margin-bottom:14px">Claimed '+meta.assigned_at.slice(0,10)+'</p>' : '') +
+    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:12px 0"><p style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Internal notes</p><textarea id="pr-internal-notes" rows="3" placeholder="Team-only notes, never sent to clinic..." style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">'+esc(meta.internal_notes||'')+'</textarea>' +
+    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:12px 0"><p style="font-size:12px;font-weight:600;color:#f59e0b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Trust fields</p><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Regulatory body</label><select id="pr-reg-body" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate Scotland</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (N. Ireland)</option></select></div><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Rating</label><select id="pr-reg-rating" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select></div><div style="margin-bottom:6px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Treats under-18s</label><select id="pr-under18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select></div><div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Minimum age</label><input id="pr-min-age" type="number" value="18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div></div></div>' +
+    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0"><p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">Actions</p>' +
+    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:10px"><p style="font-size:13px;font-weight:600;color:#166534;margin-bottom:6px">&#10003; Approve and publish</p><textarea id="pr-edit-summary" rows="2" placeholder="Note to clinic about edits (optional, leave blank if approving as submitted)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea><textarea id="pr-internal-edit-log" rows="2" placeholder="Internal edit log (not sent to clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn" style="background:#166534" onclick="submitApprove(' + JSON.stringify(id) + ')">Approve and go live</button></div>' +
+    '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;margin-bottom:10px"><p style="font-size:13px;font-weight:600;color:#854d0e;margin-bottom:6px">&#8635; Request changes</p><textarea id="pr-feedback" rows="3" placeholder="What needs to be changed or clarified? This message is sent to the clinic with a link to re-edit their submission..." style="width:100%;padding:8px 10px;border:1.5px solid #fde047;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn" style="background:#854d0e" onclick="submitRequestChanges(' + JSON.stringify(id) + ')">Send feedback and keep in pending</button></div>' +
+    '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:14px"><p style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:6px">&#10005; Reject</p><textarea id="pr-reject-reason" rows="2" placeholder="Reason for rejection (sent to the clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #fca5a5;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea><button class="btn danger" onclick="submitReject(' + JSON.stringify(id) + ')">Reject submission</button></div>';
+  document.getElementById('pending-modal-title').textContent = meta.title || sub.title || 'Review submission';
+  document.getElementById('pending-modal-body').innerHTML = html;
+  document.getElementById('pending-modal-footer').innerHTML = '<button class="btn secondary" onclick="saveAssignment(' + JSON.stringify(id) + ')">' + 'Save assignment + notes</button> <button class="btn secondary" onclick="closePendingModal()">Close</button>';
   document.getElementById('pending-overlay').classList.add('open');
 }
 
-async function approvePending(id) {
-  var items = await fetch('/admin/api/pending?pw=' + PW).then(function(r) { return r.json(); });
-  var item = items.find(function(i) { return i.id === id; });
-  if (!item) return;
-  var r = await fetch('/admin/api/pending?pw=' + PW, {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ action: 'approve', id: id, clinic_data: item })
+function collectEdits(sub) {
+  var ARRAY_FIELDS = ['treatment_types','addictions_treated','mental_health_conditions','funding_types','accreditations'];
+  var result = Object.assign({}, sub);
+  Object.keys(result).forEach(function(f) {
+    var el = document.getElementById('pr-' + f);
+    if (!el) return;
+    result[f] = ARRAY_FIELDS.indexOf(f) >= 0 ? el.value.split(',').map(function(s){return s.trim();}).filter(Boolean) : el.value;
   });
+  return result;
+}
+
+async function saveAssignment(id) {
+  var assignTo = (document.getElementById('pr-assign')||{}).value || '';
+  await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'assign',id:id,assigned_to:assignTo||null})});
+  loadPending();
+  document.getElementById('pending-overlay').classList.remove('open');
+}
+
+async function submitApprove(id) {
+  var item = _pendingItems.find(function(i){return i.id===id;});
+  if (!item) return;
+  var sub = item.submission || item;
+  var editedData = collectEdits(sub);
+  var editSummary = (document.getElementById('pr-edit-summary')||{}).value || '';
+  var trustFields = {
+    regulatory_body: (document.getElementById('pr-reg-body')||{}).value || '',
+    regulatory_rating: (document.getElementById('pr-reg-rating')||{}).value || '',
+    treats_under_18s: (document.getElementById('pr-under18')||{}).value || 'no',
+    min_age: (document.getElementById('pr-min-age')||{}).value || '18',
+  };
+  var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'approve',id:id,clinic_data:editedData,trust_fields:trustFields,edit_summary:editSummary})});
   var d = await r.json();
   if (d.ok) {
     document.getElementById('pending-overlay').classList.remove('open');
-    allClinics = await fetch('/admin/api/clinics?pw=' + PW).then(function(r) { return r.json(); });
+    allClinics = await fetch('/admin/api/clinics?pw='+PW).then(function(r){return r.json();});
     renderClinics(allClinics);
     loadPending();
   }
 }
 
-async function rejectPending(id) {
-  if (!confirm('Reject and delete this submission?')) return;
-  await fetch('/admin/api/pending?pw=' + PW, {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ action: 'reject', id: id })
-  });
-  loadPending();
+async function submitRequestChanges(id) {
+  var feedback = (document.getElementById('pr-feedback')||{}).value || '';
+  if (!feedback.trim()) { alert('Please write a feedback message for the clinic.'); return; }
+  var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_changes',id:id,feedback_message:feedback})});
+  var d = await r.json();
+  if (d.ok) {
+    document.getElementById('pending-overlay').classList.remove('open');
+    if (d.form_link) { showLink('Resubmission link for clinic', d.form_link, null); }
+    loadPending();
+  }
 }
+
+async function submitReject(id) {
+  var reason = (document.getElementById('pr-reject-reason')||{}).value || '';
+  if (!confirm('Reject this submission? The clinic will be notified.')) return;
+  var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reject',id:id,reject_reason:reason})});
+  var d = await r.json();
+  if (d.ok) { document.getElementById('pending-overlay').classList.remove('open'); loadPending(); }
+}
+
+async function rejectPending(id) { submitReject(id); }
 
 // ---- Link generation ----
 function copyLogin(id) {
@@ -380,4 +454,48 @@ function exportConvos() {
   var blob = new Blob([lines.join('\\n')], { type: 'text/markdown' });
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'monica-conversations.md'; a.click();
 }
+
+// ---- Settings ----
+var _settingsCache = null;
+var TEMPLATE_KEYS = ['submission_received','changes_requested','approved','approved_with_edits','rejected','portal_login'];
+var TEMPLATE_LABELS = {submission_received:'Submission received (to clinic)',changes_requested:'Changes requested (to clinic)',approved:'Approved as submitted (to clinic)',approved_with_edits:'Approved with edits (to clinic)',rejected:'Rejected (to clinic)',portal_login:'Portal login details (to clinic)'};
+
+async function loadSettings() {
+  var r = await fetch('/admin/api/settings?pw=' + PW);
+  _settingsCache = await r.json();
+  var fields = ['notification_email','google_chat_webhook','from_email','reply_to','team_members'];
+  fields.forEach(function(f) { var el = document.getElementById('s-' + f); if (el) el.value = _settingsCache[f] || ''; });
+  var tl = document.getElementById('template-list');
+  if (tl) {
+    tl.innerHTML = TEMPLATE_KEYS.map(function(key) {
+      var tmpl = (_settingsCache.templates || {})[key] || {};
+      return '<div style="margin-bottom:18px;background:#f8fafc;border-radius:10px;padding:16px"><p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">' + esc(TEMPLATE_LABELS[key]||key) + '</p>' +
+        '<div style="margin-bottom:8px"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Subject</label><input data-tmpl="' + key + '" data-field="subject" value="' + esc(tmpl.subject||'') + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit"></div>' +
+        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Body</label><textarea data-tmpl="' + key + '" data-field="body" rows="5" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(tmpl.body||'') + '</textarea></div></div>';
+    }).join('');
+  }
+}
+
+async function saveSettings() {
+  var fields = ['notification_email','google_chat_webhook','from_email','reply_to','team_members'];
+  var updates = {};
+  fields.forEach(function(f) { var el = document.getElementById('s-' + f); if (el) updates[f] = el.value; });
+  updates.templates = {};
+  document.querySelectorAll('[data-tmpl]').forEach(function(el) {
+    var key = el.getAttribute('data-tmpl'); var field = el.getAttribute('data-field');
+    if (!updates.templates[key]) updates.templates[key] = {};
+    updates.templates[key][field] = el.value;
+  });
+  var r = await fetch('/admin/api/settings?pw=' + PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+  var d = await r.json();
+  if (d.ok) {
+    _settingsCache = Object.assign({}, _settingsCache, updates);
+    var saved = document.getElementById('settings-saved');
+    if (saved) { saved.style.display='inline'; setTimeout(function(){saved.style.display='none';},2000); }
+  }
+}
+
+// Load settings early so team members list is ready for pending assignment
+loadSettings();
+
 `;
