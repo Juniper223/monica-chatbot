@@ -1153,7 +1153,7 @@ label{display:block;font-size:12px;color:#64748b;margin-bottom:4px;font-weight:5
 <div class="modal" style="max-width:860px">
   <button class="close-btn" onclick="document.getElementById('pending-overlay').classList.remove('open')">&times;</button>
   <h3 id="pending-modal-title">Review submission</h3>
-  <div id="pending-modal-body"></div>
+  <div class="modal-scroll"><div id="pending-modal-body"></div></div>
   <div class="modal-footer" id="pending-modal-footer"></div>
 </div>
 </div>
