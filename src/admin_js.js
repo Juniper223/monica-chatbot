@@ -186,6 +186,8 @@ async function importCSV(event) {
 // ---- Pending queue ----
 var _pendingItems = [];
 var _reviewingId = null;
+var _builtCards = {};
+
 var TYPE_BADGES = {
   new: '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">New application</span>',
   update: '<span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">Update</span>',
@@ -202,6 +204,7 @@ var STATUS_BADGES = {
 async function loadPending() {
   var r = await fetch('/admin/api/pending?pw=' + PW);
   _pendingItems = await r.json();
+  _builtCards = {};
   var active = _pendingItems.filter(function(i) { return i.meta && i.meta.status !== 'superseded' && i.meta.status !== 'rejected'; });
   var btn = document.getElementById('pending-tab-btn');
   if (btn) btn.textContent = active.length ? 'Pending (' + active.length + ')' : 'Pending';
@@ -216,117 +219,130 @@ async function loadPending() {
     var statusBadge = STATUS_BADGES[meta.status || 'new'] || '';
     var date = meta.submitted_at ? meta.submitted_at.slice(0,10) : '';
     var assignBadge = meta.assigned_to
-      ? '<span style="margin-left:8px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:2px 8px;border-radius:99px;font-size:11px">&#9679; ' + esc(meta.assigned_to) + '</span>'
-      : '<span style="margin-left:8px;background:#fef2f2;color:#991b1b;border:1px solid #fca5a5;padding:2px 8px;border-radius:99px;font-size:11px">Unassigned</span>';
-    return '<div style="background:' + (isSuperseded?'#fafafa':'#fff') + ';border-radius:10px;padding:16px 20px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);' + (isSuperseded?'opacity:.5':'') + '">' +
-      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-        '<strong style="font-size:14px">' + esc(title) + '</strong>' + typeBadge + statusBadge + assignBadge +
+      ? '<span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:2px 8px;border-radius:99px;font-size:11px">&#9679; ' + esc(meta.assigned_to) + '</span>'
+      : '<span style="background:#fef2f2;color:#991b1b;border:1px solid #fca5a5;padding:2px 8px;border-radius:99px;font-size:11px">Unassigned</span>';
+    var cardId = 'pcard-' + item.id;
+    var bodyId = 'pbody-' + item.id;
+    return '<div id="' + cardId + '" style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;' + (isSuperseded?'opacity:.5':'') + '">' +
+      '<div style="background:' + (isSuperseded?'#fafafa':'#fff') + ';padding:14px 18px;cursor:' + (isSuperseded?'default':'pointer') + ';display:flex;align-items:center;gap:8px;flex-wrap:wrap" ' +
+        (isSuperseded ? '' : 'data-pid="' + item.id + '" onclick="togglePendingCard(this.dataset.pid)"') + '>' +
+        '<strong style="font-size:14px">' + esc(title) + '</strong>' +
+        typeBadge + statusBadge + assignBadge +
         (date ? '<span style="font-size:12px;color:#94a3b8;margin-left:4px">' + date + '</span>' : '') +
-        '<div style="margin-left:auto">' +
-          (!isSuperseded ? '<button class="btn sm" onclick="openPendingReview(\\'' + item.id + '\\')">Review</button>' : '') +
-        '</div>' +
-      '</div></div>';
+        (!isSuperseded ? '<span style="margin-left:auto;font-size:13px;color:#94a3b8" id="arrow-' + item.id + '">&#9656; expand</span>' : '') +
+      '</div>' +
+      '<div id="' + bodyId + '" style="display:none;border-top:1px solid #f1f5f9;background:#fafafa;padding:20px"></div>' +
+    '</div>';
   }).join('');
 }
 
+function togglePendingCard(id) {
+  var body = document.getElementById('pbody-' + id);
+  var arrow = document.getElementById('arrow-' + id);
+  if (!body) return;
+  var isOpen = body.style.display !== 'none';
+  // Close all others first
+  _pendingItems.forEach(function(item) {
+    var b = document.getElementById('pbody-' + item.id);
+    var a = document.getElementById('arrow-' + item.id);
+    if (b && item.id !== id) { b.style.display = 'none'; if (a) a.innerHTML = '&#9656; expand'; }
+  });
+  if (isOpen) {
+    body.style.display = 'none';
+    if (arrow) arrow.innerHTML = '&#9656; expand';
+  } else {
+    body.style.display = 'block';
+    if (arrow) arrow.innerHTML = '&#9662; collapse';
+    _reviewingId = id;
+    if (!_builtCards[id]) {
+      _builtCards[id] = true;
+      body.innerHTML = buildPendingCardBody(id);
+    }
+  }
+}
 
-function closePendingModal() { var el = document.getElementById('pending-overlay'); if (el) el.classList.remove('open'); }
-function openPendingReview(id) {
-  _reviewingId = id;
+function buildPendingCardBody(id) {
   var item = _pendingItems.find(function(i) { return i.id === id; });
-  if (!item) return;
+  if (!item) return '';
   var meta = item.meta || {};
   var sub = item.submission || item;
-  var FIELD_LABELS = {title:'Clinic name',website:'Website',phone:'Phone',email:'Email',address:'Address',postcode:'Postcode',gender_model:'Gender',capacity:'Beds',detox_on_site:'Detox on site',dual_diagnosis:'Dual diagnosis',twelve_step:'12-step',is_faith_based:'Faith-based',faith_tradition:'Faith tradition',named_modalities:'Therapies',description:'Description',setting:'Setting',waiting_time:'Waiting time',languages:'Languages',price_per_week_from:'Price from',price_per_week_to:'Price to',insurance_networks:'Insurance',google_reviews_url:'Google reviews',trustpilot_url:'Trustpilot',facebook_url:'Facebook',instagram_url:'Instagram',linkedin_url:'LinkedIn',nhs_ff_score:'NHS F&F score',accreditations_other:'Other accreditations'};
+
+  var FIELD_LABELS = {title:'Clinic name',website:'Website',phone:'Phone',email:'Email',address:'Address',postcode:'Postcode',gender_model:'Gender',capacity:'Beds',detox_on_site:'Detox on site',dual_diagnosis:'Dual diagnosis',twelve_step:'12-step',is_faith_based:'Faith-based',faith_tradition:'Faith tradition',named_modalities:'Therapies',description:'Description',setting:'Setting',waiting_time:'Waiting time',languages:'Languages',price_per_week_from:'Price from (£)',price_per_week_to:'Price to (£)',insurance_networks:'Insurance',google_reviews_url:'Google reviews',trustpilot_url:'Trustpilot',facebook_url:'Facebook',instagram_url:'Instagram',linkedin_url:'LinkedIn',nhs_ff_score:'NHS F&F score',accreditations_other:'Other accreditations'};
   var ARRAY_FIELDS = ['treatment_types','addictions_treated','mental_health_conditions','funding_types','accreditations'];
+  var WIDE_FIELDS = ['description','named_modalities','addictions_treated','mental_health_conditions','treatment_types','funding_types','accreditations'];
+
   var fieldRows = '';
   Object.keys(FIELD_LABELS).concat(ARRAY_FIELDS).forEach(function(f) {
     var rawVal = sub[f];
     if (rawVal === undefined || rawVal === null || rawVal === '') return;
     var displayVal = Array.isArray(rawVal) ? rawVal.join(', ') : String(rawVal);
-    // Strip Python-style list brackets: ['A', 'B'] -> A, B
     if (typeof displayVal === 'string' && displayVal.startsWith('[')) {
       displayVal = displayVal.slice(1,-1).split(',').map(function(s){return s.trim().replace(/^['"]|['"]$/g,'');}).filter(Boolean).join(', ');
     }
-    // Humanise True/False
     if (displayVal === 'True') displayVal = 'Yes';
     else if (displayVal === 'False') displayVal = 'No';
     var label = FIELD_LABELS[f] || f;
-    var isWide = (f === 'description' || f === 'named_modalities' || f === 'addictions_treated' || f === 'mental_health_conditions' || f === 'treatment_types' || f === 'funding_types' || f === 'accreditations');
-    fieldRows += '<div style="margin-bottom:10px' + (isWide ? ';grid-column:1/-1' : '') + '"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
-      (f === 'description' ? '<textarea id="pr-' + f + '" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">' + esc(displayVal) + '</textarea>' : '<input id="pr-' + f + '" value="' + esc(displayVal) + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">') + '</div>';
+    var isWide = WIDE_FIELDS.indexOf(f) >= 0;
+    fieldRows += '<div style="margin-bottom:10px' + (isWide?';grid-column:1/-1':'') + '">' +
+      '<label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px">' + esc(label) + '</label>' +
+      (f === 'description' ? '<textarea id="pr-' + f + '" rows="4" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;background:#fff">' + esc(displayVal) + '</textarea>' : '<input id="pr-' + f + '" value="' + esc(displayVal) + '" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;background:#fff">') +
+      '</div>';
   });
+
   var teamMembers = (_settingsCache && _settingsCache.team_members ? _settingsCache.team_members : 'Jennifer').split(',').map(function(s){return s.trim();});
   var memberOptions = '<option value="">Unassigned</option>' + teamMembers.map(function(m){return '<option value="'+esc(m)+'"'+(meta.assigned_to===m?' selected':'')+'>'+esc(m)+'</option>';}).join('');
-  var teamMembers = (_settingsCache && _settingsCache.team_members ? _settingsCache.team_members : 'Jennifer').split(',').map(function(s){return s.trim();});
-  var memberOptions = '<option value="">Unassigned</option>' + teamMembers.map(function(m){return '<option value="'+esc(m)+'"'+(meta.assigned_to===m?' selected':'')+'>'+esc(m)+'</option>';}).join('');
 
-  var html =
-    // Top bar: type/status/date + assignment in one row
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid #f1f5f9;margin-bottom:18px">' +
-      (TYPE_BADGES[meta.type||'update']||'') + (STATUS_BADGES[meta.status||'new']||'') +
-      '<span style="font-size:12px;color:#94a3b8">'+(meta.submitted_at||'').slice(0,16).replace('T',' ')+'</span>' +
-      '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">' +
-        '<label style="font-size:12px;color:#64748b;font-weight:600">Assign to</label>' +
-        '<select id="pr-assign" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">' + memberOptions + '</select>' +
-      '</div>' +
-    '</div>' +
-    (meta.feedback_message ? '<div style="margin-bottom:16px;background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e"><strong>Previous feedback:</strong> '+esc(meta.feedback_message)+'</div>' : '') +
+  return (meta.feedback_message ? '<div style="margin-bottom:14px;background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;color:#92400e"><strong>Previous feedback:</strong> ' + esc(meta.feedback_message) + '</div>' : '') +
 
-    // Submitted fields — full width, clean two-col grid for compact fields
-    '<p style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Submitted data <span style="font-weight:400;color:#94a3b8;text-transform:none">(edit before approving)</span></p>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' +
-    fieldRows +
-    '</div>' +
+  '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #e2e8f0">' +
+    '<div style="display:flex;align-items:center;gap:8px"><label style="font-size:12px;color:#64748b;font-weight:600">Assign to</label>' +
+    '<select id="pr-assign" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit">' + memberOptions + '</select>' +
+    '<button class="btn sm secondary" data-pid="' + id + '" onclick="saveAssignment(this.dataset.pid)">Save</button></div>' +
+    (meta.assigned_at ? '<span style="font-size:12px;color:#94a3b8">Claimed ' + meta.assigned_at.slice(0,10) + '</span>' : '') +
+  '</div>' +
 
-    // Trust fields — amber full-width block
-    '<div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:10px;padding:16px;margin-bottom:16px">' +
-      '<p style="font-size:11px;font-weight:600;color:#92400e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Trust fields - set by Rehab Online only</p>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px">' +
-        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Regulatory body</label>' +
-        '<select id="pr-reg-body" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW (Wales)</option><option value="Care Inspectorate Scotland">Care Inspectorate</option><option value="HIS">HIS (Scotland)</option><option value="RQIA">RQIA (NI)</option></select></div>' +
-        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Rating</label>' +
-        '<select id="pr-reg-rating" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional (HIS)</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select></div>' +
-        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Treats under-18s</label>' +
-        '<select id="pr-under18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="no">No (18+)</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select></div>' +
-        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Minimum age</label>' +
-        '<input id="pr-min-age" type="number" value="18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
-        '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:3px">Last inspection</label>' +
-        '<input id="pr-last-inspection" placeholder="e.g. Nov 2024" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
-      '</div>' +
+  '<p style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Submitted data <span style="font-weight:400;color:#94a3b8;text-transform:none">(editable before approving)</span></p>' +
+  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">' + fieldRows + '</div>' +
+
+  '<div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:10px;padding:14px;margin-bottom:14px">' +
+    '<p style="font-size:11px;font-weight:600;color:#92400e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Trust fields - Rehab Online only</p>' +
+    '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">' +
+      '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Regulator</label><select id="pr-reg-body" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="CQC">CQC</option><option value="CIW">CIW</option><option value="Care Inspectorate Scotland">Care Insp. Scotland</option><option value="HIS">HIS</option><option value="RQIA">RQIA</option></select></div>' +
+      '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Rating</label><select id="pr-reg-rating" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="">-</option><option value="Outstanding">Outstanding</option><option value="Exceptional">Exceptional</option><option value="Good">Good</option><option value="Requires Improvement">Requires Improvement</option><option value="Inadequate">Inadequate</option></select></div>' +
+      '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Under-18s</label><select id="pr-under18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"><option value="no">No</option><option value="yes">Yes</option><option value="unconfirmed">Unconfirmed</option></select></div>' +
+      '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Min age</label><input id="pr-min-age" type="number" value="18" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
+      '<div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px">Last inspection</label><input id="pr-last-inspection" placeholder="e.g. Nov 2024" style="width:100%;padding:7px 9px;border:1.5px solid #fbbf24;border-radius:7px;font-size:12px;font-family:inherit"></div>' +
+    '</div></div>' +
+
+  '<div style="margin-bottom:14px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:5px">Internal notes (team only)</label>' +
+  '<textarea id="pr-internal-notes" rows="2" placeholder="Not sent to clinic..." style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;background:#fff">' + esc(meta.internal_notes||'') + '</textarea></div>' +
+
+  '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
+
+    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px">' +
+      '<p style="font-size:13px;font-weight:600;color:#166534;margin-bottom:8px">&#10003; Approve</p>' +
+      '<textarea id="pr-edit-summary" rows="2" placeholder="Note to clinic about edits (optional)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>' +
+      '<textarea id="pr-internal-edit-log" rows="2" placeholder="Internal log (not sent)..." style="width:100%;padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
+      '<button class="btn" style="background:#166534;width:100%" onclick="submitApprove(_reviewingId)">Approve and go live</button>' +
     '</div>' +
 
-    // Internal notes
-    '<div style="margin-bottom:16px"><label style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px">Internal notes (team only, never sent to clinic)</label>' +
-    '<textarea id="pr-internal-notes" rows="2" placeholder="Notes visible to team only..." style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical">'+esc(meta.internal_notes||'')+'</textarea></div>' +
-
-    // Actions
-    '<hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0">' +
-    '<p style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:10px">Actions</p>' +
-    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:10px">' +
-      '<p style="font-size:13px;font-weight:600;color:#166534;margin-bottom:8px">&#10003; Approve and publish</p>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
-        '<textarea id="pr-edit-summary" rows="2" placeholder="Note to clinic about edits (optional)..." style="padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>' +
-        '<textarea id="pr-internal-edit-log" rows="2" placeholder="Internal edit log (not sent to clinic)..." style="padding:8px 10px;border:1.5px solid #bbf7d0;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical"></textarea>' +
-      '</div>' +
-      '<button class="btn" style="background:#166534" onclick="submitApprove(_reviewingId)">Approve and go live</button>' +
-    '</div>' +
-    '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;margin-bottom:10px">' +
+    '<div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px">' +
       '<p style="font-size:13px;font-weight:600;color:#854d0e;margin-bottom:8px">&#8635; Request changes</p>' +
-      '<textarea id="pr-feedback" rows="3" placeholder="What needs to be changed? Sent to clinic with a link to re-edit their submission..." style="width:100%;padding:8px 10px;border:1.5px solid #fde047;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
-      '<button class="btn" style="background:#854d0e" onclick="submitRequestChanges(_reviewingId)">Send feedback and keep in pending</button>' +
+      '<textarea id="pr-feedback" rows="4" placeholder="What needs to change? Sent to clinic with a link to re-edit their submission..." style="width:100%;padding:8px 10px;border:1.5px solid #fde047;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
+      '<button class="btn" style="background:#854d0e;width:100%" onclick="submitRequestChanges(_reviewingId)">Send feedback</button>' +
     '</div>' +
+
     '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:14px">' +
       '<p style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:8px">&#10005; Reject</p>' +
-      '<textarea id="pr-reject-reason" rows="2" placeholder="Reason for rejection (sent to the clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #fca5a5;border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
-      '<button class="btn danger" onclick="submitReject(_reviewingId)">Reject submission</button>' +
-    '</div>';
+      '<textarea id="pr-reject-reason" rows="4" placeholder="Reason (sent to clinic)..." style="width:100%;padding:8px 10px;border:1.5px solid #fca5a5;border-radius:7px;font-size:12px;font-family:inherit;resize:vertical;margin-bottom:8px"></textarea>' +
+      '<button class="btn danger" style="width:100%" onclick="submitReject(_reviewingId)">Reject</button>' +
+    '</div>' +
 
-    document.getElementById('pending-modal-title').textContent = meta.title || sub.title || 'Review submission';
-  document.getElementById('pending-modal-body').innerHTML = html;
-  document.getElementById('pending-modal-footer').innerHTML = '<button class="btn secondary" onclick="saveAssignment(' + JSON.stringify(id) + ')">' + 'Save assignment + notes</button> <button class="btn secondary" onclick="closePendingModal()">Close</button>';
-  document.getElementById('pending-overlay').classList.add('open');
+  '</div>';
 }
+
+function closePendingModal() {}
+function openPendingReview(id) { togglePendingCard(id); }
 
 function collectEdits(sub) {
   var ARRAY_FIELDS = ['treatment_types','addictions_treated','mental_health_conditions','funding_types','accreditations'];
@@ -343,7 +359,6 @@ async function saveAssignment(id) {
   var assignTo = (document.getElementById('pr-assign')||{}).value || '';
   await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'assign',id:id,assigned_to:assignTo||null})});
   loadPending();
-  document.getElementById('pending-overlay').classList.remove('open');
 }
 
 async function submitApprove(id) {
@@ -361,7 +376,6 @@ async function submitApprove(id) {
   var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'approve',id:id,clinic_data:editedData,trust_fields:trustFields,edit_summary:editSummary})});
   var d = await r.json();
   if (d.ok) {
-    document.getElementById('pending-overlay').classList.remove('open');
     allClinics = await fetch('/admin/api/clinics?pw='+PW).then(function(r){return r.json();});
     renderClinics(allClinics);
     loadPending();
@@ -374,7 +388,6 @@ async function submitRequestChanges(id) {
   var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_changes',id:id,feedback_message:feedback})});
   var d = await r.json();
   if (d.ok) {
-    document.getElementById('pending-overlay').classList.remove('open');
     if (d.form_link) { showLink('Resubmission link for clinic', d.form_link, null); }
     loadPending();
   }
@@ -385,10 +398,10 @@ async function submitReject(id) {
   if (!confirm('Reject this submission? The clinic will be notified.')) return;
   var r = await fetch('/admin/api/pending?pw='+PW, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reject',id:id,reject_reason:reason})});
   var d = await r.json();
-  if (d.ok) { document.getElementById('pending-overlay').classList.remove('open'); loadPending(); }
+  if (d.ok) { loadPending(); }
 }
 
-async function rejectPending(id) { submitReject(id); }
+async function rejectPending(id) { _reviewingId = id; submitReject(id); }
 
 // ---- Link generation ----
 function copyLogin(id) {
