@@ -222,7 +222,7 @@ async function loadPending() {
         '<strong style="font-size:14px">' + esc(title) + '</strong>' + typeBadge + statusBadge + assignBadge +
         (date ? '<span style="font-size:12px;color:#94a3b8;margin-left:4px">' + date + '</span>' : '') +
         '<div style="margin-left:auto">' +
-          (!isSuperseded ? '<button class="btn sm" onclick="openPendingReview(' + JSON.stringify(item.id) + ')">Review</button>' : '') +
+          (!isSuperseded ? '<button class="btn sm" onclick="openPendingReview(\\'' + item.id + '\\')">Review</button>' : '') +
         '</div>' +
       '</div></div>';
   }).join('');
